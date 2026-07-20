@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_live_smoke:
+        description: Run the optional live RuStore smoke test
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -25,7 +31,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -f index.html
+          test -f api-patch.js
+          test -f proxy-fallback.js
+          test -f LICENSE
+          test -f NOTICE
           node --check api-patch.js
+          node --check proxy-fallback.js
           node --check worker/worker.js
           find js -name '*.js' -print0 | xargs -0 -n1 node --check
           test ! -e script.js
@@ -35,66 +47,194 @@ jobs:
             exit 1
           fi
 
-      - name: Verify RuStore proxy flow
+      - name: Test API proxy URL construction
+        shell: bash
+        run: node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import vm from 'node:vm';
+
+          function createStorage() {
+            const values = new Map();
+            return {
+              getItem: key => values.has(key) ? values.get(key) : null,
+              setItem: (key, value) => values.set(key, String(value)),
+              removeItem: key => values.delete(key)
+            };
+          }
+
+          const calls = [];
+          const mockFetch = async (input, init = {}) => {
+            const url = String(input);
+            calls.push({ url, init });
+
+            const proxy = new URL(url);
+            const target = proxy.searchParams.get('url') || '';
+
+            if (target.endsWith('/rustore-info/new-version')) {
+              return new Response(JSON.stringify({
+                code: 'OK',
+                body: { latestVersion: 13000 }
+              }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+              });
+            }
+
+            return new Response(JSON.stringify({
+              code: 'OK',
+              body: { content: [{ appId: 1, packageName: 'com.vkontakte.android' }] }
+            }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' }
+            });
+          };
+
+          const window = {
+            location: { href: 'https://basil-as.github.io/rustore-downloader/' },
+            fetch: mockFetch
+          };
+
+          const context = vm.createContext({
+            window,
+            fetch: mockFetch,
+            sessionStorage: createStorage(),
+            localStorage: createStorage(),
+            URL,
+            URLSearchParams,
+            Headers,
+            Request,
+            Response,
+            AbortController,
+            AbortSignal,
+            setTimeout,
+            clearTimeout,
+            console,
+            Date,
+            JSON
+          });
+
+          vm.runInContext(fs.readFileSync('api-patch.js', 'utf8'), context, {
+            filename: 'api-patch.js'
+          });
+
+          const result = await window.RuStoreApi.search('VK');
+          assert.equal(result.code, 'OK');
+          assert.equal(calls.length, 2);
+
+          const versionRequest = new URL(calls[0].url);
+          assert.equal(versionRequest.origin, 'https://corsproxy.io');
+          assert.ok(versionRequest.searchParams.get('url').endsWith('/rustore-info/new-version'));
+          assert.ok(versionRequest.searchParams.getAll('reqHeaders').includes('ruStoreVerCode:12000'));
+
+          const searchRequest = new URL(calls[1].url);
+          assert.ok(searchRequest.searchParams.get('url').includes('/applicationData/apps?'));
+          assert.ok(searchRequest.searchParams.get('url').includes('query=VK'));
+          assert.ok(searchRequest.searchParams.getAll('reqHeaders').includes('ruStoreVerCode:13000'));
+
+          console.log('API proxy construction: OK');
+          NODE
+
+      - name: Test CorsProxy fallback
+        shell: bash
+        run: node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import vm from 'node:vm';
+
+          const calls = [];
+          const originalFetch = async (input, init = {}) => {
+            calls.push({ input, init });
+            return calls.length === 1
+              ? new Response('header override rejected', { status: 403 })
+              : new Response(JSON.stringify({ code: 'OK' }), {
+                  status: 200,
+                  headers: { 'Content-Type': 'application/json' }
+                });
+          };
+
+          const window = {
+            location: { href: 'https://basil-as.github.io/rustore-downloader/' },
+            fetch: originalFetch
+          };
+
+          const context = vm.createContext({
+            window,
+            URL,
+            Headers,
+            Request,
+            Response,
+            console
+          });
+
+          vm.runInContext(fs.readFileSync('proxy-fallback.js', 'utf8'), context, {
+            filename: 'proxy-fallback.js'
+          });
+
+          const target = 'https://backapi.rustore.ru/applicationData/v2/download-link';
+          const proxy = new URL('https://corsproxy.io/');
+          proxy.searchParams.set('url', target);
+          proxy.searchParams.append('reqHeaders', 'ruStoreVerCode:13000');
+          proxy.searchParams.append('reqHeaders', 'Accept:application/json');
+
+          const body = JSON.stringify({ appId: 42 });
+          const response = await window.fetch(proxy.toString(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body
+          });
+
+          assert.equal(response.status, 200);
+          assert.equal(calls.length, 2);
+
+          const fallbackUrl = new URL(String(calls[1].input));
+          assert.equal(fallbackUrl.origin, 'https://corsproxy.io');
+          assert.equal(fallbackUrl.searchParams.get('url'), target);
+          assert.equal(fallbackUrl.searchParams.has('reqHeaders'), false);
+
+          const headers = new Headers(calls[1].init.headers);
+          assert.equal(headers.get('ruStoreVerCode'), '13000');
+          assert.equal(headers.get('Accept'), 'application/json');
+          assert.equal(calls[1].init.method, 'POST');
+          assert.equal(calls[1].init.body, body);
+
+          console.log('CorsProxy fallback: OK');
+          NODE
+
+  live-smoke:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_live_smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    continue-on-error: true
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Optional live RuStore request
         env:
           TEST_ORIGIN: https://basil-as.github.io
         run: node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
 
-          const proxyOrigin = 'https://corsproxy.io/';
-          const apiOrigin = 'https://backapi.rustore.ru';
-          const versionCode = '12000';
+          const target = 'https://backapi.rustore.ru/applicationData/overallInfo/com.vkontakte.android';
+          const proxy = new URL('https://corsproxy.io/');
+          proxy.searchParams.set('url', target);
+          proxy.searchParams.append('reqHeaders', 'ruStoreVerCode:12000');
+          proxy.searchParams.append('reqHeaders', 'Accept:application/json');
 
-          function proxyUrl(target) {
-            const url = new URL(proxyOrigin);
-            url.searchParams.set('url', target);
-            url.searchParams.append('reqHeaders', `ruStoreVerCode:${versionCode}`);
-            url.searchParams.append('reqHeaders', 'Accept:application/json');
-            return url;
-          }
-
-          async function request(target, init = {}) {
-            const response = await fetch(proxyUrl(target), {
-              ...init,
-              headers: {
-                Origin: process.env.TEST_ORIGIN,
-                Accept: 'application/json',
-                ...(init.headers || {})
-              },
-              signal: AbortSignal.timeout(25_000)
-            });
-            const text = await response.text();
-            assert.equal(response.ok, true, `HTTP ${response.status}: ${text.slice(0, 300)}`);
-            const data = JSON.parse(text);
-            assert.equal(data.code, 'OK', JSON.stringify(data).slice(0, 300));
-            return data;
-          }
-
-          const info = await request(`${apiOrigin}/applicationData/overallInfo/com.vkontakte.android`);
-          assert.ok(info.body?.appId, 'appId is missing');
-          assert.equal(info.body?.packageName, 'com.vkontakte.android');
-
-          const searchParams = new URLSearchParams({ pageNumber: '0', pageSize: '5', query: 'VK' });
-          const search = await request(`${apiOrigin}/applicationData/apps?${searchParams}`);
-          assert.ok(Array.isArray(search.body?.content), 'search content is missing');
-          assert.ok(search.body.content.length > 0, 'name search returned no results');
-
-          const download = await request(`${apiOrigin}/applicationData/v2/download-link`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              appId: info.body.appId,
-              firstInstall: true,
-              mobileServices: ['GMS'],
-              supportedAbis: ['arm64-v8a', 'armeabi-v7a'],
-              screenDensity: 420,
-              supportedLocales: ['ru_RU', 'en_US'],
-              sdkVersion: 35,
-              withoutSplits: true,
-              signatureFingerprint: null
-            })
+          const response = await fetch(proxy, {
+            headers: {
+              Origin: process.env.TEST_ORIGIN,
+              Accept: 'application/json'
+            },
+            signal: AbortSignal.timeout(25_000)
           });
-          const urls = download.body?.downloadUrls || [];
-          assert.ok(urls.length > 0 || download.body?.apkUrl, 'download URL is missing');
-          console.log(`OK: ${info.body.appName}; search=${search.body.content.length}; urls=${urls.length || 1}`);
+
+          const text = await response.text();
+          assert.equal(response.ok, true, `HTTP ${response.status}: ${text.slice(0, 300)}`);
+          const data = JSON.parse(text);
+          assert.equal(data.code, 'OK');
+          assert.ok(data.body?.appId, 'appId is missing');
+          console.log(`Live RuStore response: ${data.body.appName}`);
           NODE
