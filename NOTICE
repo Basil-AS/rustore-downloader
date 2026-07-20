@@ -1,0 +1,11 @@
+RuStore APK Downloader
+Copyright (c) 2026 Basil-AS
+
+The project idea and the original interface were inspired by:
+https://github.com/kolya00736/rustore-downloader
+
+The current implementation was substantially rebuilt and is distributed under
+the MIT License included in this repository.
+
+RuStore and related names and trademarks belong to their respective owners.
+This project is unofficial and is not affiliated with VK or RuStore.

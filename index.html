@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
+    <meta name="description" content="Поиск приложений и получение прямых ссылок на оригинальные APK из RuStore прямо в браузере.">
+    <meta name="theme-color" content="#4f46e5">
+    <meta name="robots" content="index,follow">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="RuStore APK Downloader">
+    <meta property="og:description" content="Поиск приложений RuStore по названию или package name и получение прямых ссылок на APK.">
+    <meta property="og:url" content="https://basil-as.github.io/rustore-downloader/">
+    <link rel="canonical" href="https://basil-as.github.io/rustore-downloader/">
+    <link rel="dns-prefetch" href="//backapi.rustore.ru">
+    <link rel="dns-prefetch" href="//corsproxy.io">
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link rel="icon" href="https://www.rustore.ru/favicon.ico">
+    <title>RuStore APK Downloader — скачать APK из RuStore</title>
+</head>
+<body>
+    <header class="hero">
+        <div class="hero-orb hero-orb-a"></div>
+        <div class="hero-orb hero-orb-b"></div>
+        <div class="hero-content">
+            <div class="brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                    <path d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M5 17v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>
+            <p class="eyebrow">Open-source web tool</p>
+            <h1>RuStore APK Downloader</h1>
+            <p class="hero-description">Ищите приложения по названию или package name, смотрите карточку и получайте временные оригинальные ссылки RuStore на APK.</p>
+            <div class="hero-actions">
+                <a class="primary-action" href="#search">Найти приложение</a>
+                <a class="secondary-action" href="https://github.com/Basil-AS/rustore-downloader" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
+            </div>
+            <div class="trust-row">
+                <span>Без регистрации</span>
+                <span>Поиск по названию</span>
+                <span>Прямые ссылки RuStore</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="page-shell">
+        <section id="search" class="search-panel" aria-labelledby="search-title">
+            <div class="search-heading">
+                <div>
+                    <p class="section-kicker">Каталог RuStore</p>
+                    <h2 id="search-title">Поиск приложений</h2>
+                </div>
+                <div id="apiStatus" class="api-status" data-kind="neutral">Готов к поиску</div>
+            </div>
+
+            <div class="search-control">
+                <svg class="search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
+                    <path d="m16.5 16.5 4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <input id="searchInput" type="search" autocomplete="off" spellcheck="false" placeholder="Название приложения или package name, например com.vkontakte.android" aria-label="Поиск приложений RuStore">
+                <button id="clearSearch" class="clear-search hidden" type="button" aria-label="Очистить поиск">×</button>
+                <div id="searchSuggestions" class="suggestions" hidden></div>
+            </div>
+
+            <div class="search-footer">
+                <p>Начните вводить название. Для точного результата можно вставить полный package name.</p>
+                <button type="button" class="example-chip" data-example="com.vkontakte.android">Пример: VK</button>
+            </div>
+        </section>
+
+        <section class="results-section" aria-live="polite">
+            <div id="searchResults" class="results-grid">
+                <div class="empty-state">
+                    <div class="empty-state-icon">APK</div>
+                    <h3>Введите название приложения</h3>
+                    <p>Поддерживается поиск по обычному названию и идентификатору пакета Android.</p>
+                </div>
+            </div>
+            <button id="loadMore" class="load-more" type="button" hidden>Показать ещё</button>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <p>Неофициальный open-source инструмент. Не связан с VK или RuStore.</p>
+        <div><a href="https://github.com/Basil-AS/rustore-downloader" target="_blank" rel="noopener noreferrer">GitHub</a><span>·</span><a href="https://github.com/Basil-AS/rustore-downloader/issues" target="_blank" rel="noopener noreferrer">Сообщить о проблеме</a></div>
+    </footer>
+
+    <div id="downloadModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="download-title">
+        <div class="modal-content"><button class="modal-close" type="button" aria-label="Закрыть">×</button><h2 id="download-title">Скачать APK</h2><div id="downloadResults"></div></div>
+    </div>
+    <div id="versionModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="version-title">
+        <div class="modal-content"><button class="modal-close" type="button" aria-label="Закрыть">×</button><h2 id="version-title">История версий</h2><div id="versionHistory"></div></div>
+    </div>
+    <div id="descriptionModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="description-title">
+        <div class="modal-content modal-content-wide"><button class="modal-close" type="button" aria-label="Закрыть">×</button><h2 id="description-title">Описание</h2><div id="descriptionContent"></div></div>
+    </div>
+    <div id="commentsModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="appCommentsHeader">
+        <div class="modal-content"><button class="modal-close" type="button" aria-label="Закрыть">×</button><h2 id="appCommentsHeader">Отзывы</h2><select id="commentsFilterOption"><option value="NEW_FIRST">Сначала новые</option><option value="USEFUL_FIRST">Сначала полезные</option><option value="POSITIVE_FIRST">Сначала положительные</option><option value="NEGATIVE_FIRST">Сначала отрицательные</option></select><div id="appCommentsBody"></div></div>
+    </div>
+    <div id="imagePreviewModal" class="modal hidden image-modal" role="dialog" aria-modal="true">
+        <div class="image-stage"><button class="modal-close image-close" type="button" aria-label="Закрыть">×</button><button id="prevImage" class="image-nav image-prev" type="button" aria-label="Предыдущий скриншот">‹</button><img id="previewImage" src="" alt="Скриншот приложения"><button id="nextImage" class="image-nav image-next" type="button" aria-label="Следующий скриншот">›</button><div id="imageProgress"></div></div>
+    </div>
+
+    <script src="api-patch.js"></script>
+    <script src="proxy-fallback.js"></script>
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>

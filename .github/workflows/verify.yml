@@ -1,0 +1,100 @@
+name: Verify web app
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check static files
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check api-patch.js
+          node --check worker/worker.js
+          find js -name '*.js' -print0 | xargs -0 -n1 node --check
+          test ! -e script.js
+          test ! -e styles.css
+          forbidden=$(printf '\x72\x75\x2e\x6d\x73\x70\x2e\x72\x66\x2e\x61\x70\x70')
+          if grep -RFn --exclude-dir=.git -- "$forbidden" .; then
+            exit 1
+          fi
+
+      - name: Verify RuStore proxy flow
+        env:
+          TEST_ORIGIN: https://basil-as.github.io
+        run: node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+
+          const proxyOrigin = 'https://corsproxy.io/';
+          const apiOrigin = 'https://backapi.rustore.ru';
+          const versionCode = '12000';
+
+          function proxyUrl(target) {
+            const url = new URL(proxyOrigin);
+            url.searchParams.set('url', target);
+            url.searchParams.append('reqHeaders', `ruStoreVerCode:${versionCode}`);
+            url.searchParams.append('reqHeaders', 'Accept:application/json');
+            return url;
+          }
+
+          async function request(target, init = {}) {
+            const response = await fetch(proxyUrl(target), {
+              ...init,
+              headers: {
+                Origin: process.env.TEST_ORIGIN,
+                Accept: 'application/json',
+                ...(init.headers || {})
+              },
+              signal: AbortSignal.timeout(25_000)
+            });
+            const text = await response.text();
+            assert.equal(response.ok, true, `HTTP ${response.status}: ${text.slice(0, 300)}`);
+            const data = JSON.parse(text);
+            assert.equal(data.code, 'OK', JSON.stringify(data).slice(0, 300));
+            return data;
+          }
+
+          const info = await request(`${apiOrigin}/applicationData/overallInfo/com.vkontakte.android`);
+          assert.ok(info.body?.appId, 'appId is missing');
+          assert.equal(info.body?.packageName, 'com.vkontakte.android');
+
+          const searchParams = new URLSearchParams({ pageNumber: '0', pageSize: '5', query: 'VK' });
+          const search = await request(`${apiOrigin}/applicationData/apps?${searchParams}`);
+          assert.ok(Array.isArray(search.body?.content), 'search content is missing');
+          assert.ok(search.body.content.length > 0, 'name search returned no results');
+
+          const download = await request(`${apiOrigin}/applicationData/v2/download-link`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              appId: info.body.appId,
+              firstInstall: true,
+              mobileServices: ['GMS'],
+              supportedAbis: ['arm64-v8a', 'armeabi-v7a'],
+              screenDensity: 420,
+              supportedLocales: ['ru_RU', 'en_US'],
+              sdkVersion: 35,
+              withoutSplits: true,
+              signatureFingerprint: null
+            })
+          });
+          const urls = download.body?.downloadUrls || [];
+          assert.ok(urls.length > 0 || download.body?.apkUrl, 'download URL is missing');
+          console.log(`OK: ${info.body.appName}; search=${search.body.content.length}; urls=${urls.length || 1}`);
+          NODE
