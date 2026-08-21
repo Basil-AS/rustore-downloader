@@ -1,110 +1,79 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="referrer" content="no-referrer">
-    <meta name="description" content="Поиск приложений и получение прямых ссылок на оригинальные APK из RuStore прямо в браузере.">
-    <meta name="theme-color" content="#4f46e5">
-    <meta name="robots" content="index,follow">
-    <meta property="og:type" content="website">
-    <meta property="og:title" content="RuStore APK Downloader">
-    <meta property="og:description" content="Поиск приложений RuStore по названию или package name и получение прямых ссылок на APK.">
-    <meta property="og:url" content="https://basil-as.github.io/rustore-downloader/">
-    <link rel="canonical" href="https://basil-as.github.io/rustore-downloader/">
-    <link rel="dns-prefetch" href="//backapi.rustore.ru">
-    <link rel="dns-prefetch" href="//corsproxy.io">
-    <link rel="stylesheet" href="css/base.css">
-    <link rel="stylesheet" href="css/components.css">
-    <link rel="icon" href="https://www.rustore.ru/favicon.ico">
-    <title>RuStore APK Downloader — скачать APK из RuStore</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Google Play APK Downloader — original APK, split APK/APKS, OBB, architecture variants and historical versionCode when Google still serves them.">
+  <title>Google Play APK Downloader</title>
+  <link rel="stylesheet" href="./assets/app.css">
 </head>
 <body>
-    <header class="hero">
-        <div class="hero-orb hero-orb-a"></div>
-        <div class="hero-orb hero-orb-b"></div>
-        <div class="hero-content">
-            <div class="brand-mark" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none">
-                    <path d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M5 17v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-            </div>
-            <p class="eyebrow">Open-source web tool</p>
-            <h1>RuStore APK Downloader</h1>
-            <p class="hero-description">Ищите приложения по названию или package name, смотрите карточку и получайте временные оригинальные ссылки RuStore на APK.</p>
-            <div class="hero-actions">
-                <a class="primary-action" href="#search">Найти приложение</a>
-                <a class="secondary-action" href="https://github.com/Basil-AS/rustore-downloader" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
-            </div>
-            <div class="trust-row">
-                <span>Без регистрации</span>
-                <span>Поиск по названию</span>
-                <span>Прямые ссылки RuStore</span>
-            </div>
-        </div>
-    </header>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="Google Play APK Downloader"><span class="brand-mark" aria-hidden="true">▶</span><span><b>Google Play</b><small>APK Downloader</small></span></a>
+    <div class="header-actions"><span id="backendState" class="status status-off">backend: неизвестно</span><button id="settingsButton" class="button ghost" type="button">Backend</button></div>
+  </header>
 
-    <main class="page-shell">
-        <section id="search" class="search-panel" aria-labelledby="search-title">
-            <div class="search-heading">
-                <div>
-                    <p class="section-kicker">Каталог RuStore</p>
-                    <h2 id="search-title">Поиск приложений</h2>
-                </div>
-                <div id="apiStatus" class="api-status" data-kind="neutral">Готов к поиску</div>
-            </div>
+  <main class="shell">
+    <section class="hero">
+      <p class="eyebrow">ORIGINAL GOOGLE PLAY DELIVERY</p>
+      <h1>APK, split APK, APKS и варианты архитектур</h1>
+      <p class="lead">Получает файлы напрямую из Google Play delivery/CDN. Поддерживает ARM64, ARMv7, x86_64, x86, Android TV, языковые splits и указанный <code>versionCode</code>, если Google ещё его отдаёт.</p>
+      <form id="searchForm" class="searchbar"><input id="query" autocomplete="off" spellcheck="false" placeholder="Название или package: org.videolan.vlc" aria-label="Поиск приложения"><button class="button primary" type="submit">Найти</button></form>
+      <div id="searchResults" class="search-results" hidden></div>
+    </section>
 
-            <div class="search-control">
-                <svg class="search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
-                    <path d="m16.5 16.5 4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <input id="searchInput" type="search" autocomplete="off" spellcheck="false" placeholder="Название приложения или package name, например com.vkontakte.android" aria-label="Поиск приложений RuStore">
-                <button id="clearSearch" class="clear-search hidden" type="button" aria-label="Очистить поиск">×</button>
-                <div id="searchSuggestions" class="suggestions" hidden></div>
-            </div>
+    <section id="optionsCard" class="panel" hidden>
+      <div class="panel-heading"><div><p class="eyebrow">DELIVERY OPTIONS</p><h2 id="selectedPackage">Параметры скачивания</h2></div><button id="clearSelection" class="button ghost" type="button">Сменить приложение</button></div>
+      <form id="resolveForm" class="options-grid">
+        <fieldset>
+          <legend>Архитектуры / устройства</legend>
+          <label class="check"><input type="checkbox" name="arch" value="arm64" checked><span><b>ARM64</b><small>arm64-v8a · современные телефоны</small></span></label>
+          <label class="check"><input type="checkbox" name="arch" value="armv7"><span><b>ARMv7</b><small>armeabi-v7a · старые 32-bit устройства</small></span></label>
+          <label class="check"><input type="checkbox" name="arch" value="x86_64"><span><b>x86_64</b><small>эмуляторы / Chromebook / desktop</small></span></label>
+          <label class="check"><input type="checkbox" name="arch" value="x86"><span><b>x86</b><small>старые 32-bit эмуляторы</small></span></label>
+          <label class="check"><input type="checkbox" name="arch" value="tv"><span><b>Android TV</b><small>TV/Google TV device profiles</small></span></label>
+          <div class="mini-actions"><button id="selectAllArch" type="button" class="text-button">Выбрать всё</button><button id="onlyArm64" type="button" class="text-button">Только ARM64</button></div>
+        </fieldset>
+        <fieldset>
+          <legend>Версия и локали</legend>
+          <label class="field"><span>versionCode <small>(пусто = последняя для профиля)</small></span><input id="versionCode" inputmode="numeric" pattern="[0-9]*" placeholder="например 231205015"></label>
+          <label class="field"><span>Языки <small>(через запятую)</small></span><input id="locales" value="ru,en" placeholder="ru,en,de,zh-CN"></label>
+          <label class="switch-row"><input id="deepScan" type="checkbox"><span><b>Глубокий перебор профилей</b><small>Ищет разные ABI/DPI/SDK-выдачи и удаляет дубликаты. Медленнее и сильнее нагружает Play/dispenser.</small></span></label>
+          <label class="switch-row"><input id="forceRefresh" type="checkbox"><span><b>Обновить Play token</b><small>Игнорировать кэшированный токен при первом запросе.</small></span></label>
+        </fieldset>
+        <div class="resolve-actions"><button id="resolveButton" class="button primary wide" type="submit">Получить варианты Google Play</button><p class="muted">Исторические версии не архивируются Google Play “для всех”: поле versionCode сработает только пока конкретная версия доступна хотя бы одному совместимому профилю.</p></div>
+      </form>
+    </section>
 
-            <div class="search-footer">
-                <p>Начните вводить название. Для точного результата можно вставить полный package name.</p>
-                <button type="button" class="example-chip" data-example="com.vkontakte.android">Пример: VK</button>
-            </div>
-        </section>
+    <section id="progressCard" class="panel progress-card" hidden><div class="spinner" aria-hidden="true"></div><div><h2>Запрашиваю Google Play…</h2><p id="progressText">Получаю device token, details и delivery manifest.</p></div></section>
 
-        <section class="results-section" aria-live="polite">
-            <div id="searchResults" class="results-grid">
-                <div class="empty-state">
-                    <div class="empty-state-icon">APK</div>
-                    <h3>Введите название приложения</h3>
-                    <p>Поддерживается поиск по обычному названию и идентификатору пакета Android.</p>
-                </div>
-            </div>
-            <button id="loadMore" class="load-more" type="button" hidden>Показать ещё</button>
-        </section>
-    </main>
+    <section id="manifestCard" class="panel" hidden>
+      <div class="panel-heading manifest-head"><div><p class="eyebrow">RESOLVED DELIVERY</p><h2 id="manifestTitle">Приложение</h2><p id="manifestMeta" class="muted"></p></div><a id="allZip" class="button" href="#">Все варианты ZIP</a></div>
+      <div class="notice original"><b>Оригиналы:</b> base/split/OBB/.dm скачиваются как Google их выдал. <b>Merged APK:</b> splits объединяются APKEditor и подписываются локальным ключом backend — это уже не оригинальная Google-подпись.</div>
+      <div id="variants" class="variants"></div>
+      <details id="diagnosticsBlock" class="diagnostics" hidden><summary>Диагностика несовместимых профилей</summary><pre id="diagnostics"></pre></details>
+    </section>
 
-    <footer class="site-footer">
-        <p>Неофициальный open-source инструмент. Не связан с VK или RuStore.</p>
-        <div><a href="https://github.com/Basil-AS/rustore-downloader" target="_blank" rel="noopener noreferrer">GitHub</a><span>·</span><a href="https://github.com/Basil-AS/rustore-downloader/issues" target="_blank" rel="noopener noreferrer">Сообщить о проблеме</a></div>
-    </footer>
+    <section class="info-grid">
+      <article><span>01</span><h3>Original delivery</h3><p>Файлы идут из Google Play FDFE/CDN, а не из APKMirror/APKPure и подобных каталогов.</p></article>
+      <article><span>02</span><h3>APKS</h3><p>Готовый ZIP/APKS-набор base + splits с SAI metadata. Можно ставить split-инсталлятором.</p></article>
+      <article><span>03</span><h3>All architectures</h3><p>ARM64, ARMv7, x86_64, x86 и Android TV. Deep Scan перебирает встроенные device profiles и дедуплицирует одинаковые выдачи.</p></article>
+      <article><span>04</span><h3>Merged APK</h3><p>Опциональный standalone APK через APKEditor. Он переподписан и может не подходить приложениям с Play Integrity или проверкой подписи.</p></article>
+    </section>
+  </main>
 
-    <div id="downloadModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="download-title">
-        <div class="modal-content"><button class="modal-close" type="button" aria-label="Закрыть">×</button><h2 id="download-title">Скачать APK</h2><div id="downloadResults"></div></div>
-    </div>
-    <div id="versionModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="version-title">
-        <div class="modal-content"><button class="modal-close" type="button" aria-label="Закрыть">×</button><h2 id="version-title">История версий</h2><div id="versionHistory"></div></div>
-    </div>
-    <div id="descriptionModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="description-title">
-        <div class="modal-content modal-content-wide"><button class="modal-close" type="button" aria-label="Закрыть">×</button><h2 id="description-title">Описание</h2><div id="descriptionContent"></div></div>
-    </div>
-    <div id="commentsModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="appCommentsHeader">
-        <div class="modal-content"><button class="modal-close" type="button" aria-label="Закрыть">×</button><h2 id="appCommentsHeader">Отзывы</h2><select id="commentsFilterOption"><option value="NEW_FIRST">Сначала новые</option><option value="USEFUL_FIRST">Сначала полезные</option><option value="POSITIVE_FIRST">Сначала положительные</option><option value="NEGATIVE_FIRST">Сначала отрицательные</option></select><div id="appCommentsBody"></div></div>
-    </div>
-    <div id="imagePreviewModal" class="modal hidden image-modal" role="dialog" aria-modal="true">
-        <div class="image-stage"><button class="modal-close image-close" type="button" aria-label="Закрыть">×</button><button id="prevImage" class="image-nav image-prev" type="button" aria-label="Предыдущий скриншот">‹</button><img id="previewImage" src="" alt="Скриншот приложения"><button id="nextImage" class="image-nav image-next" type="button" aria-label="Следующий скриншот">›</button><div id="imageProgress"></div></div>
-    </div>
+  <dialog id="settingsDialog">
+    <form method="dialog" class="dialog-card">
+      <div class="panel-heading"><div><p class="eyebrow">CONNECTION</p><h2>Backend API</h2></div><button value="cancel" class="icon-button" aria-label="Закрыть">×</button></div>
+      <p class="muted">GitHub Pages — статический фронт. Google Play authentication остаётся на вашем backend и не попадает в браузер.</p>
+      <label class="field"><span>API URL</span><input id="backendUrl" placeholder="https://play-api.example.com"></label>
+      <div class="dialog-actions"><button id="testBackend" type="button" class="button">Проверить</button><button id="saveBackend" value="default" class="button primary">Сохранить</button></div>
+      <pre id="backendTest" class="test-output" hidden></pre>
+    </form>
+  </dialog>
 
-    <script src="api-patch.js"></script>
-    <script src="proxy-fallback.js"></script>
-    <script type="module" src="js/main.js"></script>
+  <footer><span>Unofficial Google Play client · use a separate Google account.</span><a href="https://github.com/Basil-AS" rel="noopener">Basil-AS</a></footer>
+  <script src="./assets/app.js" defer></script>
 </body>
 </html>

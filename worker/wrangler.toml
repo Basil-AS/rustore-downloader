@@ -1,6 +1,0 @@
-name = "rustore-api-proxy"
-main = "worker.js"
-compatibility_date = "2026-07-17"
-
-[vars]
-ALLOWED_ORIGINS = "https://basil-as.github.io,http://localhost:8080"

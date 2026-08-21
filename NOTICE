@@ -1,11 +1,20 @@
-RuStore APK Downloader
-Copyright (c) 2026 Basil-AS
+Google Play APK Downloader
 
-The project idea and the original interface were inspired by:
-https://github.com/kolya00736/rustore-downloader
+This project was derived conceptually and structurally from Basil-AS/rustore-downloader,
+then rewritten for Google Play delivery.
 
-The current implementation was substantially rebuilt and is distributed under
-the MIT License included in this repository.
+Runtime Google Play protocol implementation:
+  gplaydl — Copyright (c) 2021 Rehmat Alam — MIT License
+  https://github.com/rehmatworks/gplaydl
+  pinned source commit: 7c3d87f20a5f61f6cfa7446683bb4c698bfa2396
 
-RuStore and related names and trademarks belong to their respective owners.
-This project is unofficial and is not affiliated with VK or RuStore.
+Optional split-APK merge engine:
+  APKEditor by REAndroid
+  https://github.com/REAndroid/APKEditor
+  downloaded from the latest upstream GitHub release during container build.
+
+The .apks metadata layout follows the public SAI meta format documentation.
+No SAI source code is incorporated.
+
+Google Play is a trademark/service of Google LLC. This project is unofficial and
+is not affiliated with or endorsed by Google.
