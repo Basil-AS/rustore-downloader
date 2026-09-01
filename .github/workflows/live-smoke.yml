@@ -27,6 +27,7 @@ jobs:
           const target = 'https://backapi.rustore.ru/applicationData/overallInfo/com.vkontakte.android';
           const response = await fetch(`https://test.cors.workers.dev/?${target}`, {
             headers: {
+              Origin: 'https://basil-as.github.io',
               Accept: 'application/json',
               ruStoreVerCode: '110802'
             },
@@ -35,6 +36,7 @@ jobs:
 
           const text = await response.text();
           assert.equal(response.ok, true, `HTTP ${response.status}: ${text.slice(0, 300)}`);
+          assert.equal(response.headers.get('access-control-allow-origin'), 'https://basil-as.github.io');
           const data = JSON.parse(text);
           assert.equal(data.code, 'OK');
           assert.ok(data.body?.appId, 'appId is missing');
