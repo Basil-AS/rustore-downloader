@@ -1,4 +1,4 @@
-import { $, dom, state, escapeHtml, formatFileSize, formatDate, formatNumber, androidVersion } from "./common.js?v=20260901-11";
+import { $, dom, state, escapeHtml, formatFileSize, formatDate, formatNumber, androidVersion } from "./common.js";
 
 export function setStatus(text, kind = "neutral") {
     dom.apiStatus.textContent = text;
