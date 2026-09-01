@@ -2,10 +2,12 @@
     "use strict";
 
     const RUSTORE_ORIGIN = "https://backapi.rustore.ru";
-    const PUBLIC_PROXY = "https://corsproxy.io/";
-    const FALLBACK_VERSION_CODE = "12000";
-    const VERSION_CACHE_KEY = "rustore:version-code:v2";
-    const RESPONSE_CACHE_PREFIX = "rustore:response:v2:";
+    const PUBLIC_WEB_ORIGIN = "https://api.rustore.ru";
+    const EMERGENCY_PROXY = "https://test.cors.workers.dev/?";
+    const CORSPROXY_ORIGIN = "https://corsproxy.io/";
+    const FALLBACK_VERSION_CODE = "110802";
+    const VERSION_CACHE_KEY = "rustore:version-code:v3";
+    const RESPONSE_CACHE_PREFIX = "rustore:response:v3:";
     const DEFAULT_TIMEOUT_MS = 18000;
 
     let versionCodePromise = null;
@@ -32,7 +34,7 @@
                 expiresAt: Date.now() + ttlMs
             }));
         } catch {
-            // Browsers may disable sessionStorage. The application still works without it.
+            // The application still works when storage is unavailable.
         }
     }
 
@@ -51,43 +53,94 @@
         return controller.signal;
     }
 
-    function proxyTargetUrl(targetUrl, versionCode) {
-        let storedProxy = "";
-        try { storedProxy = localStorage.getItem("rustoreProxyUrl") || ""; }
-        catch { storedProxy = ""; }
-        const customTemplate = window.RUSTORE_PROXY_URL || storedProxy;
-        if (customTemplate) {
-            return customTemplate.includes("{url}")
-                ? customTemplate.replace("{url}", encodeURIComponent(targetUrl))
-                : `${customTemplate}${customTemplate.includes("?") ? "&" : "?"}url=${encodeURIComponent(targetUrl)}`;
+    function getStoredValue(key) {
+        try { return localStorage.getItem(key) || ""; }
+        catch { return ""; }
+    }
+
+    function customProxyTemplate() {
+        return window.RUSTORE_PROXY_URL || getStoredValue("rustoreProxyUrl");
+    }
+
+    function corsProxyKey() {
+        return window.RUSTORE_CORSPROXY_KEY || getStoredValue("rustoreCorsProxyKey");
+    }
+
+    function customProxyUrl(template, targetUrl) {
+        return template.includes("{url}")
+            ? template.replace("{url}", encodeURIComponent(targetUrl))
+            : `${template}${template.includes("?") ? "&" : "?"}url=${encodeURIComponent(targetUrl)}`;
+    }
+
+    function transportCandidates(targetUrl, versionCode) {
+        const candidates = [];
+        const custom = customProxyTemplate();
+        if (custom) {
+            candidates.push({
+                name: "custom-worker",
+                url: customProxyUrl(custom, targetUrl),
+                forwardVersionHeader: false
+            });
         }
 
-        const proxy = new URL(PUBLIC_PROXY);
-        proxy.searchParams.set("url", targetUrl);
-        proxy.searchParams.append("reqHeaders", `ruStoreVerCode:${versionCode}`);
-        proxy.searchParams.append("reqHeaders", "Accept:application/json");
-        proxy.searchParams.append("resHeaders", "content-type:application/json; charset=utf-8");
-        return proxy.toString();
+        const key = corsProxyKey();
+        if (key) {
+            const proxy = new URL(CORSPROXY_ORIGIN);
+            proxy.searchParams.set("key", key);
+            proxy.searchParams.set("url", targetUrl);
+            proxy.searchParams.append("reqHeaders", `ruStoreVerCode:${versionCode}`);
+            proxy.searchParams.append("reqHeaders", "Accept:application/json");
+            candidates.push({
+                name: "corsproxy-key",
+                url: proxy.toString(),
+                forwardVersionHeader: false
+            });
+        }
+
+        // Emergency public fallback. It supports GET/POST and forwards custom headers.
+        // A self-hosted Worker is still preferred for stable production use.
+        candidates.push({
+            name: "public-worker-fallback",
+            url: `${EMERGENCY_PROXY}${targetUrl}`,
+            forwardVersionHeader: true
+        });
+
+        return candidates;
     }
 
     async function rawProxyFetch(targetUrl, init = {}, { versionCode = FALLBACK_VERSION_CODE, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-        const timeoutController = new AbortController();
-        const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
         const safeInit = init || {};
+        let lastError;
 
-        try {
-            const headers = new Headers(safeInit.headers || {});
-            if (!headers.has("Accept")) headers.set("Accept", "application/json");
+        for (const candidate of transportCandidates(targetUrl, versionCode)) {
+            const timeoutController = new AbortController();
+            const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
+            try {
+                const headers = new Headers(safeInit.headers || {});
+                if (!headers.has("Accept")) headers.set("Accept", "application/json");
+                if (candidate.forwardVersionHeader) headers.set("ruStoreVerCode", versionCode);
 
-            return await fetch(proxyTargetUrl(targetUrl, versionCode), {
-                ...safeInit,
-                headers,
-                signal: combineSignals(safeInit.signal, timeoutController.signal),
-                referrerPolicy: "no-referrer"
-            });
-        } finally {
-            clearTimeout(timeout);
+                const response = await fetch(candidate.url, {
+                    ...safeInit,
+                    headers,
+                    signal: combineSignals(safeInit.signal, timeoutController.signal),
+                    referrerPolicy: "no-referrer"
+                });
+
+                if (response.ok || ![401, 403, 429, 502, 503, 504].includes(response.status)) {
+                    return response;
+                }
+
+                lastError = new Error(`${candidate.name}: HTTP ${response.status}`);
+            } catch (error) {
+                if (safeInit.signal?.aborted) throw error;
+                lastError = error;
+            } finally {
+                clearTimeout(timeout);
+            }
         }
+
+        throw lastError || new Error("Нет доступного транспорта к RuStore API");
     }
 
     async function getVersionCode() {
@@ -152,7 +205,7 @@
                 }
 
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${data?.message || "ошибка запроса"}`);
+                    throw new Error(`HTTP ${response.status}: ${data?.message || data?.error?.message || "ошибка запроса"}`);
                 }
                 if (data?.code && data.code !== "OK") {
                     throw new Error(data.message || `RuStore API: ${data.code}`);
@@ -170,6 +223,25 @@
         throw lastError || new Error("RuStore API недоступен");
     }
 
+    async function publicSuggest(query, signal) {
+        const params = new URLSearchParams({ query });
+        const url = `${PUBLIC_WEB_ORIGIN}/v1/showcase/web/search/suggests?${params}`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        try {
+            const response = await fetch(url, {
+                headers: { Accept: "application/json" },
+                signal: combineSignals(signal, controller.signal),
+                referrerPolicy: "no-referrer"
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            return { code: "OK", body: data?.suggests || [] };
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
     const api = {
         getVersionCode,
 
@@ -182,9 +254,13 @@
             return request(`/applicationData/apps?${params}`, { signal }, { cacheTtlMs: 2 * 60 * 1000 });
         },
 
-        suggest(query, signal) {
-            const params = new URLSearchParams({ query });
-            return request(`/search/suggest?${params}`, { signal }, { cacheTtlMs: 10 * 60 * 1000 });
+        async suggest(query, signal) {
+            try {
+                return await publicSuggest(query, signal);
+            } catch {
+                const params = new URLSearchParams({ query });
+                return request(`/search/suggest?${params}`, { signal }, { cacheTtlMs: 10 * 60 * 1000 });
+            }
         },
 
         info(packageName, signal) {
@@ -213,16 +289,16 @@
             return request("/applicationData/v2/download-link", {
                 method: "POST",
                 signal,
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json; charset=utf-8" },
                 body: JSON.stringify({
                     appId,
                     firstInstall: true,
-                    mobileServices: ["GMS"],
-                    supportedAbis: ["arm64-v8a", "armeabi-v7a"],
-                    screenDensity: 420,
+                    mobileServices: ["GMS", "HMS"],
+                    supportedAbis: ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"],
+                    screenDensity: 640,
                     supportedLocales: ["ru_RU", "en_US"],
                     sdkVersion: 35,
-                    withoutSplits: true,
+                    withoutSplits: false,
                     signatureFingerprint: null
                 })
             }, { attempts: 2, timeoutMs: 25000 });
