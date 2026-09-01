@@ -53,6 +53,7 @@ function scheduleSuggestions(query, delay = 180) {
 
 function scheduleSearch(query, delay = 550) {
     clearTimeout(searchTimer);
+    if (query.length < 2) return;
     searchTimer = setTimeout(() => {
         if (dom.searchInput.value.trim() === query) searchApps(query);
     }, delay);
@@ -91,7 +92,7 @@ dom.searchInput.addEventListener("keydown", event => {
         event.preventDefault();
         clearTimeout(searchTimer);
         closeSuggestions();
-        searchApps(dom.searchInput.value);
+        if (dom.searchInput.value.trim().length >= 2) searchApps(dom.searchInput.value);
     } else if (event.key === "Escape") {
         closeSuggestions();
         dom.searchInput.blur();
@@ -107,11 +108,13 @@ dom.clearSearch.addEventListener("click", () => {
 dom.suggestions.addEventListener("click", event => {
     const button = event.target.closest("[data-suggestion]");
     if (!button) return;
-    dom.searchInput.value = button.dataset.suggestion;
+    const exactPackage = button.dataset.suggestionPackage || "";
+    const query = exactPackage || button.dataset.suggestion;
+    dom.searchInput.value = query;
     dom.clearSearch.classList.remove("hidden");
     clearTimeout(searchTimer);
     closeSuggestions();
-    searchApps(dom.searchInput.value);
+    searchApps(query);
 });
 
 document.addEventListener("click", async event => {
