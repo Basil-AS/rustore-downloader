@@ -1,8 +1,9 @@
-import { $, dom, state } from "./common.js";
+import { $, dom, state, PACKAGE_RE } from "./common.js";
 import { setStatus, emptyState, hideModal, openPreview, updatePreview } from "./render.js";
 import { searchApps, getDetails, showDetails, showVersions, showComments, downloadApp, updateSuggestions, screenshots } from "./actions.js";
 
-let debounceTimer;
+let searchTimer;
+let suggestionTimer;
 
 function transportReady() {
     return Boolean(window.RuStoreApi?.isConfigured?.());
@@ -30,6 +31,7 @@ function resetStatus() {
 }
 
 function closeSuggestions({ abort = true } = {}) {
+    clearTimeout(suggestionTimer);
     if (abort) {
         state.suggestionController?.abort();
         state.suggestionController = null;
@@ -37,29 +39,57 @@ function closeSuggestions({ abort = true } = {}) {
     dom.suggestions.hidden = true;
 }
 
+function scheduleSuggestions(query, delay = 180) {
+    clearTimeout(suggestionTimer);
+    if (query.length < 2 || PACKAGE_RE.test(query)) {
+        closeSuggestions();
+        return;
+    }
+    suggestionTimer = setTimeout(() => {
+        if (dom.searchInput.value.trim() !== query || document.activeElement !== dom.searchInput) return;
+        updateSuggestions(query);
+    }, delay);
+}
+
+function scheduleSearch(query, delay = 550) {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+        if (dom.searchInput.value.trim() === query) searchApps(query);
+    }, delay);
+}
+
 dom.searchInput.addEventListener("input", () => {
     const query = dom.searchInput.value.trim();
     dom.clearSearch.classList.toggle("hidden", !query);
-    clearTimeout(debounceTimer);
+    clearTimeout(searchTimer);
+    clearTimeout(suggestionTimer);
+    state.searchController?.abort();
+
     if (!query) {
-        state.searchController?.abort();
         state.query = "";
         closeSuggestions();
         if (transportReady()) {
             emptyState("Введите название приложения", "Можно искать по названию или идентификатору пакета Android.");
         } else {
-            emptyState("Нужен серверный транспорт", "На Cloudflare Pages API работает автоматически. На чистом GitHub Pages нужен собственный Worker или другой серверный транспорт.");
+            emptyState("Нужен серверный транспорт", "GitHub Pages использует подключённый Cloudflare Worker для доступа к RuStore API.");
         }
         resetStatus();
         return;
     }
-    updateSuggestions(query);
-    debounceTimer = setTimeout(() => searchApps(query), 330);
+
+    scheduleSuggestions(query);
+    scheduleSearch(query, PACKAGE_RE.test(query) ? 350 : 550);
+});
+
+dom.searchInput.addEventListener("focus", () => {
+    const query = dom.searchInput.value.trim();
+    if (query.length >= 2 && !PACKAGE_RE.test(query)) scheduleSuggestions(query, 80);
 });
 
 dom.searchInput.addEventListener("keydown", event => {
     if (event.key === "Enter") {
-        clearTimeout(debounceTimer);
+        event.preventDefault();
+        clearTimeout(searchTimer);
         closeSuggestions();
         searchApps(dom.searchInput.value);
     } else if (event.key === "Escape") {
@@ -78,6 +108,8 @@ dom.suggestions.addEventListener("click", event => {
     const button = event.target.closest("[data-suggestion]");
     if (!button) return;
     dom.searchInput.value = button.dataset.suggestion;
+    dom.clearSearch.classList.remove("hidden");
+    clearTimeout(searchTimer);
     closeSuggestions();
     searchApps(dom.searchInput.value);
 });
@@ -135,5 +167,5 @@ $("#commentsFilterOption").addEventListener("change", event => {
 
 resetStatus();
 if (!transportReady()) {
-    emptyState("Нужен серверный транспорт", "Рекомендуемый вариант — импортировать этот репозиторий в Cloudflare Pages: встроенная Pages Function /api заработает автоматически.");
+    emptyState("Нужен серверный транспорт", "Для GitHub Pages должен быть доступен подключённый Cloudflare Worker.");
 }
