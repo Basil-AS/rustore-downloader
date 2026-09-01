@@ -15,24 +15,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
+          package-manager-cache: false
 
-      - name: Check static files
+      - name: Check static and edge files
         shell: bash
         run: |
           set -euo pipefail
           test -f index.html
           test -f api-patch.js
+          test -f 'functions/api/[[path]].js'
           test -f vercel.json
           test -f worker/worker.js
           test -f LICENSE
           test -f NOTICE
           node --check api-patch.js
           node --check worker/worker.js
+          cp 'functions/api/[[path]].js' /tmp/pages-function.mjs
+          node --check /tmp/pages-function.mjs
           find js -name '*.js' -print0 | xargs -0 -n1 node --check
           test ! -e script.js
           test ! -e styles.css
@@ -42,7 +46,77 @@ jobs:
             exit 1
           fi
 
-      - name: Test Vercel same-origin RuStore transport
+      - name: Test Cloudflare Pages Function proxy
+        shell: bash
+        run: |
+          cp 'functions/api/[[path]].js' /tmp/pages-function.mjs
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { pathToFileURL } from 'node:url';
+
+          const { onRequest } = await import(`${pathToFileURL('/tmp/pages-function.mjs').href}?t=${Date.now()}`);
+          const calls = [];
+
+          globalThis.fetch = async (input, init = {}) => {
+            const url = String(input);
+            calls.push({ url, init });
+
+            if (url.startsWith('https://backapi.rustore.ru/applicationData/apps?')) {
+              return Response.json({ code: 'OK', body: { content: [], totalElements: 0, totalPages: 0 } });
+            }
+
+            if (url === 'https://backapi.rustore.ru/applicationData/v2/download-link') {
+              return Response.json({ code: 'OK', body: { downloadUrls: [{ url: 'https://static.rustore.ru/example.apk' }] } });
+            }
+
+            throw new Error(`Unexpected upstream URL: ${url}`);
+          };
+
+          const searchResponse = await onRequest({
+            request: new Request('https://rustore-downloader.pages.dev/api/applicationData/apps?pageNumber=0&pageSize=18&query=VK', {
+              headers: { ruStoreVerCode: '110802', Accept: 'application/json' }
+            }),
+            params: { path: ['applicationData', 'apps'] }
+          });
+
+          assert.equal(searchResponse.status, 200);
+          assert.equal((await searchResponse.json()).code, 'OK');
+          assert.equal(calls[0].url, 'https://backapi.rustore.ru/applicationData/apps?pageNumber=0&pageSize=18&query=VK');
+          assert.equal(new Headers(calls[0].init.headers).get('ruStoreVerCode'), '110802');
+          assert.equal(calls[0].init.method, 'GET');
+
+          const body = JSON.stringify({ appId: 1, firstInstall: true, withoutSplits: false });
+          const downloadResponse = await onRequest({
+            request: new Request('https://rustore-downloader.pages.dev/api/applicationData/v2/download-link', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json; charset=utf-8',
+                ruStoreVerCode: '110802'
+              },
+              body
+            }),
+            params: { path: ['applicationData', 'v2', 'download-link'] }
+          });
+
+          assert.equal(downloadResponse.status, 200);
+          assert.equal((await downloadResponse.json()).code, 'OK');
+          assert.equal(calls[1].url, 'https://backapi.rustore.ru/applicationData/v2/download-link');
+          assert.equal(calls[1].init.method, 'POST');
+          assert.equal(new Headers(calls[1].init.headers).get('Content-Type'), 'application/json; charset=utf-8');
+          assert.equal(Buffer.from(calls[1].init.body).toString(), body);
+
+          const callCount = calls.length;
+          const forbiddenResponse = await onRequest({
+            request: new Request('https://rustore-downloader.pages.dev/api/not-allowed'),
+            params: { path: ['not-allowed'] }
+          });
+          assert.equal(forbiddenResponse.status, 403);
+          assert.equal(calls.length, callCount);
+
+          console.log('Cloudflare Pages Function proxy: OK');
+          NODE
+
+      - name: Test Cloudflare Pages frontend transport
         shell: bash
         run: |
           node --input-type=module <<'NODE'
@@ -65,24 +139,21 @@ jobs:
             calls.push({ url, init });
 
             if (url === '/api/rustore-info/new-version') {
-              return new Response(JSON.stringify({ code: 'OK', body: { latestVersion: 110802 } }), {
-                status: 200,
-                headers: { 'Content-Type': 'application/json' }
-              });
+              return Response.json({ code: 'OK', body: { latestVersion: 110802 } });
             }
 
             if (url.startsWith('/api/applicationData/apps?')) {
-              return new Response(JSON.stringify({
+              return Response.json({
                 code: 'OK',
                 body: { content: [{ appId: 1, packageName: 'com.vkontakte.android' }], totalElements: 1, totalPages: 1 }
-              }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+              });
             }
 
             if (url === '/api/applicationData/v2/download-link') {
-              return new Response(JSON.stringify({
+              return Response.json({
                 code: 'OK',
                 body: { downloadUrls: [{ url: 'https://static.rustore.ru/example.apk' }] }
-              }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+              });
             }
 
             throw new Error(`Unexpected URL: ${url}`);
@@ -90,8 +161,8 @@ jobs:
 
           const window = {
             location: {
-              href: 'https://rustore-downloader.vercel.app/',
-              hostname: 'rustore-downloader.vercel.app'
+              href: 'https://rustore-downloader.pages.dev/',
+              hostname: 'rustore-downloader.pages.dev'
             },
             fetch: mockFetch
           };
@@ -116,7 +187,7 @@ jobs:
           });
 
           vm.runInContext(fs.readFileSync('api-patch.js', 'utf8'), context, { filename: 'api-patch.js' });
-          assert.equal(window.RuStoreApi.getTransportMode(), 'same-origin');
+          assert.equal(window.RuStoreApi.getTransportMode(), 'cloudflare-pages');
           assert.equal(window.RuStoreApi.isConfigured(), true);
 
           const search = await window.RuStoreApi.search('VK');
@@ -134,7 +205,7 @@ jobs:
           assert.equal(calls[2].init.method, 'POST');
           assert.match(String(calls[2].init.body), /"withoutSplits":false/);
 
-          console.log('Vercel same-origin transport: OK');
+          console.log('Cloudflare Pages frontend transport: OK');
           NODE
 
       - name: Test unconfigured static host fails clearly
