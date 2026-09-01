@@ -1,6 +1,6 @@
 import { $, dom, state, PACKAGE_RE } from "./common.js";
 import { setStatus, emptyState, hideModal, openPreview, updatePreview } from "./render.js";
-import { searchApps, getDetails, showDetails, showVersions, showComments, downloadApp, updateSuggestions, screenshots } from "./actions.js?v=20260901-11";
+import { searchApps, getDetails, showDetails, showVersions, showComments, downloadApp, updateSuggestions, screenshots } from "./actions.js?v=20260901-12";
 
 const PACKAGE_PREFIX_RE = /^[a-zA-Z][\w]*(?:\.[\w]+)+\.$/;
 const PACKAGE_LIKE_RE = /^[a-zA-Z][\w]*(?:\.[\w]*)+$/;
