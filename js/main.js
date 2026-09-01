@@ -8,10 +8,20 @@ function transportReady() {
     return Boolean(window.RuStoreApi?.isConfigured?.());
 }
 
+function transportLabel(mode) {
+    return ({
+        "cloudflare-pages": "Cloudflare Pages",
+        "vercel": "Vercel",
+        "same-origin": "Same-origin API",
+        "custom-worker": "Cloudflare Worker",
+        "corsproxy-key": "CorsProxy"
+    })[mode] || mode || "API";
+}
+
 function resetStatus() {
     if (transportReady()) {
-        const mode = window.RuStoreApi.getTransportMode?.() || "api";
-        setStatus(`API подключён: ${mode}`, "ok");
+        const mode = window.RuStoreApi.getTransportMode?.();
+        setStatus(`API подключён: ${transportLabel(mode)}`, "ok");
     } else {
         setStatus("Нужен API-прокси", "error");
     }
@@ -28,7 +38,7 @@ dom.searchInput.addEventListener("input", () => {
         if (transportReady()) {
             emptyState("Введите название приложения", "Можно искать по названию или идентификатору пакета Android.");
         } else {
-            emptyState("Нужен серверный транспорт", "GitHub Pages не может напрямую отправлять обязательный ruStoreVerCode в RuStore API. Используйте Vercel-деплой, собственный Worker или CorsProxy API key.");
+            emptyState("Нужен серверный транспорт", "На Cloudflare Pages API работает автоматически. На чистом GitHub Pages нужен собственный Worker или другой серверный транспорт.");
         }
         resetStatus();
         return;
@@ -105,5 +115,5 @@ $("#commentsFilterOption").addEventListener("change", event => {
 
 resetStatus();
 if (!transportReady()) {
-    emptyState("Нужен серверный транспорт", "Для полного поиска и получения APK разверните этот репозиторий в Vercel либо подключите собственный Cloudflare Worker. Код уже подготовлен.");
+    emptyState("Нужен серверный транспорт", "Рекомендуемый вариант — импортировать этот репозиторий в Cloudflare Pages: встроенная Pages Function /api заработает автоматически.");
 }
