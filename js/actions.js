@@ -1,8 +1,11 @@
-import { api, PACKAGE_RE, detailsCache, state, dom, $, escapeHtml, formatDate, formatNumber, mergeApp, deduplicateApps } from "./common.js";
+import { api, PACKAGE_RE, PACKAGE_PREFIX_RE, PACKAGE_LIKE_RE, detailsCache, state, dom, $, escapeHtml, formatDate, formatNumber, mergeApp, deduplicateApps } from "./common.js";
 import { setStatus, emptyState, loadingState, showError, cardMarkup, showModal } from "./render.js";
 
 const SEARCH_PAGE_SIZE = 12;
 const MAX_VISIBLE_PER_PAGE = 8;
+const PACKAGE_PREFIX_PAGE_SIZE = 50;
+const MAX_PACKAGE_PREFIX_PAGES = 8;
+const GENERIC_PACKAGE_PARTS = new Set(["com", "ru", "org", "net", "io", "app", "android"]);
 
 function normalizeSearch(value) {
     return String(value || "").normalize("NFKC").toLocaleLowerCase("ru-RU").trim();
@@ -39,16 +42,76 @@ function relevanceScore(app, query) {
 }
 
 function cleanSearchResults(items, query) {
-    const unique = deduplicateApps(items);
-    const ranked = unique.map((app, index) => ({ app, index, score: relevanceScore(app, query) }))
-        .sort((a, b) => b.score - a.score || a.index - b.index);
-    const relevant = ranked.filter(item => item.score > 0);
-    const selected = relevant.length ? relevant : ranked;
-    return selected.slice(0, MAX_VISIBLE_PER_PAGE).map(item => item.app);
+    return deduplicateApps(items)
+        .map((app, index) => ({ app, index, score: relevanceScore(app, query) }))
+        .filter(item => item.score > 0)
+        .sort((a, b) => b.score - a.score || a.index - b.index)
+        .slice(0, MAX_VISIBLE_PER_PAGE)
+        .map(item => item.app);
 }
 
 function visibleCardCount() {
     return dom.results.querySelectorAll(".app-card").length;
+}
+
+function packagePrefixSeed(prefix) {
+    const parts = normalizeSearch(prefix).replace(/\.$/, "").split(".").filter(Boolean);
+    return [...parts].reverse().find(part => part.length >= 3 && !GENERIC_PACKAGE_PARTS.has(part)) || parts.at(-1) || prefix;
+}
+
+function sortPackagePrefixApps(items) {
+    return deduplicateApps(items).sort((a, b) => {
+        const ratingDiff = Number(b.averageUserRating || 0) - Number(a.averageUserRating || 0);
+        if (Math.abs(ratingDiff) > 0.05) return ratingDiff;
+        return String(a.appName || a.packageName).localeCompare(String(b.appName || b.packageName), "ru");
+    });
+}
+
+async function searchPackagePrefix(prefix) {
+    state.loading = true;
+    dom.loadMore.hidden = true;
+    const normalizedPrefix = normalizeSearch(prefix);
+    const seed = packagePrefixSeed(prefix);
+    setStatus(`Ищем ${prefix}*…`, "loading");
+
+    try {
+        const signal = state.searchController.signal;
+        const matches = [];
+        let page = 0;
+        let totalPages = 1;
+
+        while (page < totalPages && page < MAX_PACKAGE_PREFIX_PAGES) {
+            const response = await api.search(seed, page, PACKAGE_PREFIX_PAGE_SIZE, signal);
+            if (state.query !== prefix || signal.aborted) return;
+            const content = Array.isArray(response?.body?.content) ? response.body.content : [];
+            matches.push(...content.filter(item => normalizeSearch(item?.packageName).startsWith(normalizedPrefix)));
+            totalPages = Math.max(1, Number(response?.body?.totalPages || 1));
+            page += 1;
+            if (!content.length) break;
+        }
+
+        const apps = sortPackagePrefixApps(matches);
+        dom.results.innerHTML = "";
+        if (!apps.length) {
+            emptyState("Пакеты не найдены", `В результатах RuStore нет приложений с package name, начинающимся на ${prefix}`);
+            setStatus("Совпадений по package prefix нет");
+            return;
+        }
+
+        dom.results.insertAdjacentHTML("beforeend", apps.map(cardMarkup).join(""));
+        state.page = page;
+        state.totalPages = totalPages;
+        const capped = page < totalPages;
+        setStatus(capped ? `По префиксу: ${formatNumber(apps.length)}+` : `По префиксу: ${formatNumber(apps.length)}`, capped ? "neutral" : "ok");
+    } catch (error) {
+        if (error?.name !== "AbortError") {
+            console.error(error);
+            showError("Не удалось найти package prefix", `${error.message}. Попробуйте ещё раз.`);
+            setStatus("API недоступен", "error");
+        }
+    } finally {
+        state.loading = false;
+    }
 }
 
 async function searchExactPackage(packageName) {
@@ -97,11 +160,20 @@ export async function searchApps(query, append = false) {
         state.totalPages = 0;
         state.loading = false;
         dom.loadMore.hidden = true;
-        loadingState(PACKAGE_RE.test(trimmed) ? "Проверяем точный package name…" : "Ищем наиболее релевантные приложения…");
+
+        if (PACKAGE_PREFIX_RE.test(trimmed)) {
+            loadingState(`Ищем все пакеты ${trimmed}*…`);
+            await searchPackagePrefix(trimmed);
+            return;
+        }
+
         if (PACKAGE_RE.test(trimmed)) {
+            loadingState("Проверяем точный package name…");
             await searchExactPackage(trimmed);
             return;
         }
+
+        loadingState("Ищем наиболее релевантные приложения…");
     }
 
     state.loading = true;
@@ -121,7 +193,7 @@ export async function searchApps(query, append = false) {
         }
 
         if (!apps.length && !append) {
-            emptyState("Ничего релевантного не найдено", "Попробуйте более точное название или полный package name приложения.");
+            emptyState("Ничего релевантного не найдено", "Попробуйте более точное название, полный package name или package prefix с точкой на конце — например com.yandex.");
             setStatus("Результатов нет");
             return;
         }
@@ -217,7 +289,7 @@ export async function updateSuggestions(query) {
     state.suggestionController?.abort();
     const controller = new AbortController();
     state.suggestionController = controller;
-    if (query.length < 2 || PACKAGE_RE.test(query)) { dom.suggestions.hidden = true; return; }
+    if (query.length < 2 || PACKAGE_LIKE_RE.test(query)) { dom.suggestions.hidden = true; return; }
     try {
         const response = await api.suggest(query, controller.signal);
         if (controller.signal.aborted || dom.searchInput.value.trim() !== query || document.activeElement !== dom.searchInput) return;
