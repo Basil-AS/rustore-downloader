@@ -1,6 +1,8 @@
-import { api, PACKAGE_RE, PACKAGE_PREFIX_RE, PACKAGE_LIKE_RE, detailsCache, state, dom, $, escapeHtml, formatDate, formatNumber, mergeApp, deduplicateApps } from "./common.js";
+import { api, PACKAGE_RE, detailsCache, state, dom, $, escapeHtml, formatDate, formatNumber, mergeApp, deduplicateApps } from "./common.js";
 import { setStatus, emptyState, loadingState, showError, cardMarkup, showModal } from "./render.js";
 
+const PACKAGE_PREFIX_RE = /^[a-zA-Z][\w]*(?:\.[\w]+)+\.$/;
+const PACKAGE_LIKE_RE = /^[a-zA-Z][\w]*(?:\.[\w]*)+$/;
 const SEARCH_PAGE_SIZE = 12;
 const MAX_VISIBLE_PER_PAGE = 8;
 const PACKAGE_PREFIX_PAGE_SIZE = 50;
