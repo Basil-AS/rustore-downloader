@@ -6,12 +6,6 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      run_live_smoke:
-        description: Run the optional live RuStore smoke test
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -33,6 +27,8 @@ jobs:
           set -euo pipefail
           test -f index.html
           test -f api-patch.js
+          test -f vercel.json
+          test -f worker/worker.js
           test -f LICENSE
           test -f NOTICE
           node --check api-patch.js
@@ -40,12 +36,13 @@ jobs:
           find js -name '*.js' -print0 | xargs -0 -n1 node --check
           test ! -e script.js
           test ! -e styles.css
+          test ! -e proxy-fallback.js
           forbidden=$(printf '\x72\x75\x2e\x6d\x73\x70\x2e\x72\x66\x2e\x61\x70\x70')
           if grep -RFn --exclude-dir=.git -- "$forbidden" .; then
             exit 1
           fi
 
-      - name: Test RuStore browser transport
+      - name: Test Vercel same-origin RuStore transport
         shell: bash
         run: |
           node --input-type=module <<'NODE'
@@ -62,32 +59,26 @@ jobs:
             };
           }
 
-          const prefix = 'https://test.cors.workers.dev/?';
           const calls = [];
           const mockFetch = async (input, init = {}) => {
             const url = String(input);
             calls.push({ url, init });
-            const target = url.startsWith(prefix) ? url.slice(prefix.length) : url;
 
-            if (target.endsWith('/rustore-info/new-version')) {
+            if (url === '/api/rustore-info/new-version') {
+              return new Response(JSON.stringify({ code: 'OK', body: { latestVersion: 110802 } }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+              });
+            }
+
+            if (url.startsWith('/api/applicationData/apps?')) {
               return new Response(JSON.stringify({
                 code: 'OK',
-                body: { latestVersion: 110802 }
+                body: { content: [{ appId: 1, packageName: 'com.vkontakte.android' }], totalElements: 1, totalPages: 1 }
               }), { status: 200, headers: { 'Content-Type': 'application/json' } });
             }
 
-            if (target.includes('/applicationData/apps?')) {
-              return new Response(JSON.stringify({
-                code: 'OK',
-                body: {
-                  content: [{ appId: 1, packageName: 'com.vkontakte.android' }],
-                  totalElements: 1,
-                  totalPages: 1
-                }
-              }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-            }
-
-            if (target.endsWith('/applicationData/v2/download-link')) {
+            if (url === '/api/applicationData/v2/download-link') {
               return new Response(JSON.stringify({
                 code: 'OK',
                 body: { downloadUrls: [{ url: 'https://static.rustore.ru/example.apk' }] }
@@ -98,7 +89,10 @@ jobs:
           };
 
           const window = {
-            location: { href: 'https://basil-as.github.io/rustore-downloader/' },
+            location: {
+              href: 'https://rustore-downloader.vercel.app/',
+              hostname: 'rustore-downloader.vercel.app'
+            },
             fetch: mockFetch
           };
 
@@ -122,58 +116,65 @@ jobs:
           });
 
           vm.runInContext(fs.readFileSync('api-patch.js', 'utf8'), context, { filename: 'api-patch.js' });
+          assert.equal(window.RuStoreApi.getTransportMode(), 'same-origin');
+          assert.equal(window.RuStoreApi.isConfigured(), true);
 
           const search = await window.RuStoreApi.search('VK');
           assert.equal(search.code, 'OK');
           assert.equal(calls.length, 2);
-          assert.ok(calls[0].url.startsWith(prefix + 'https://backapi.rustore.ru/rustore-info/new-version'));
-          assert.equal(new Headers(calls[0].init.headers).get('ruStoreVerCode'), '110802');
-          assert.ok(calls[1].url.startsWith(prefix + 'https://backapi.rustore.ru/applicationData/apps?'));
+          assert.equal(calls[0].url, '/api/rustore-info/new-version');
+          assert.match(calls[1].url, /^\/api\/applicationData\/apps\?/);
           assert.ok(calls[1].url.includes('query=VK'));
           assert.equal(new Headers(calls[1].init.headers).get('ruStoreVerCode'), '110802');
 
           const download = await window.RuStoreApi.downloadV2(1);
           assert.equal(download.code, 'OK');
-          assert.equal(calls.length, 3);
-          assert.ok(calls[2].url.startsWith(prefix + 'https://backapi.rustore.ru/applicationData/v2/download-link'));
-          const headers = new Headers(calls[2].init.headers);
-          assert.equal(headers.get('ruStoreVerCode'), '110802');
-          assert.match(headers.get('Content-Type') || '', /^application\/json/);
+          assert.equal(calls[2].url, '/api/applicationData/v2/download-link');
+          assert.equal(new Headers(calls[2].init.headers).get('ruStoreVerCode'), '110802');
           assert.equal(calls[2].init.method, 'POST');
           assert.match(String(calls[2].init.body), /"withoutSplits":false/);
 
-          console.log('RuStore browser transport: OK');
+          console.log('Vercel same-origin transport: OK');
           NODE
 
-  live-smoke:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_live_smoke }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
-    continue-on-error: true
-    steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Optional live RuStore request
+      - name: Test unconfigured static host fails clearly
         shell: bash
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import vm from 'node:vm';
 
-          const target = 'https://backapi.rustore.ru/applicationData/overallInfo/com.vkontakte.android';
-          const response = await fetch(`https://test.cors.workers.dev/?${target}`, {
-            headers: {
-              Accept: 'application/json',
-              ruStoreVerCode: '110802'
-            },
-            signal: AbortSignal.timeout(25_000)
+          const storage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+          const window = {
+            location: { href: 'https://basil-as.github.io/rustore-downloader/', hostname: 'basil-as.github.io' },
+            fetch: async () => { throw new Error('fetch must not be called without transport'); }
+          };
+          const context = vm.createContext({
+            window,
+            fetch: window.fetch,
+            sessionStorage: storage,
+            localStorage: storage,
+            URL,
+            URLSearchParams,
+            Headers,
+            Request,
+            Response,
+            AbortController,
+            AbortSignal,
+            setTimeout,
+            clearTimeout,
+            console,
+            Date,
+            JSON
           });
 
-          const text = await response.text();
-          assert.equal(response.ok, true, `HTTP ${response.status}: ${text.slice(0, 300)}`);
-          const data = JSON.parse(text);
-          assert.equal(data.code, 'OK');
-          assert.ok(data.body?.appId, 'appId is missing');
-          console.log(`Live RuStore response: ${data.body.appName}`);
+          vm.runInContext(fs.readFileSync('api-patch.js', 'utf8'), context, { filename: 'api-patch.js' });
+          assert.equal(window.RuStoreApi.getTransportMode(), 'unconfigured');
+          assert.equal(window.RuStoreApi.isConfigured(), false);
+          await assert.rejects(
+            () => window.RuStoreApi.info('com.vkontakte.android'),
+            /нужен серверный транспорт/
+          );
+          console.log('Unconfigured static host error: OK');
           NODE
