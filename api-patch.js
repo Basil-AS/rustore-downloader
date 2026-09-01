@@ -3,12 +3,12 @@
 
     const RUSTORE_ORIGIN = "https://backapi.rustore.ru";
     const PUBLIC_WEB_ORIGIN = "https://api.rustore.ru";
-    const EMERGENCY_PROXY = "https://test.cors.workers.dev/?";
     const CORSPROXY_ORIGIN = "https://corsproxy.io/";
     const FALLBACK_VERSION_CODE = "110802";
-    const VERSION_CACHE_KEY = "rustore:version-code:v3";
-    const RESPONSE_CACHE_PREFIX = "rustore:response:v3:";
+    const VERSION_CACHE_KEY = "rustore:version-code:v4";
+    const RESPONSE_CACHE_PREFIX = "rustore:response:v4:";
     const DEFAULT_TIMEOUT_MS = 18000;
+    const NO_TRANSPORT_MESSAGE = "Для доступа к RuStore API нужен серверный транспорт. Разверните проект в Vercel, настройте собственный Cloudflare Worker или укажите CorsProxy API key.";
 
     let versionCodePromise = null;
 
@@ -55,25 +55,19 @@
         catch { return ""; }
     }
 
+    function currentHostname() {
+        const direct = String(window.location?.hostname || "").trim();
+        if (direct) return direct;
+        try { return new URL(String(window.location?.href || "")).hostname; }
+        catch { return ""; }
+    }
+
     function customProxyTemplate() {
         return window.RUSTORE_PROXY_URL || getStoredValue("rustoreProxyUrl");
     }
 
     function corsProxyKey() {
         return window.RUSTORE_CORSPROXY_KEY || getStoredValue("rustoreCorsProxyKey");
-    }
-
-    function customProxyUrl(template, targetUrl) {
-        return template.includes("{url}")
-            ? template.replace("{url}", encodeURIComponent(targetUrl))
-            : `${template}${template.includes("?") ? "&" : "?"}url=${encodeURIComponent(targetUrl)}`;
-    }
-
-    function currentHostname() {
-        const direct = String(window.location?.hostname || "").trim();
-        if (direct) return direct;
-        try { return new URL(String(window.location?.href || "")).hostname; }
-        catch { return ""; }
     }
 
     function canUseSameOriginProxy() {
@@ -83,9 +77,22 @@
         );
     }
 
+    function customProxyUrl(template, targetUrl) {
+        return template.includes("{url}")
+            ? template.replace("{url}", encodeURIComponent(targetUrl))
+            : `${template}${template.includes("?") ? "&" : "?"}url=${encodeURIComponent(targetUrl)}`;
+    }
+
     function sameOriginProxyUrl(targetUrl) {
         const target = new URL(targetUrl);
         return `/api${target.pathname}${target.search}`;
+    }
+
+    function getTransportMode() {
+        if (canUseSameOriginProxy()) return "same-origin";
+        if (customProxyTemplate()) return "custom-worker";
+        if (corsProxyKey()) return "corsproxy-key";
+        return "unconfigured";
     }
 
     function transportCandidates(targetUrl, versionCode) {
@@ -122,22 +129,16 @@
             });
         }
 
-        // Emergency fallback for static hosts such as GitHub Pages.
-        // A first-party Vercel rewrite or self-hosted Worker is preferred for production.
-        candidates.push({
-            name: "public-worker-fallback",
-            url: `${EMERGENCY_PROXY}${targetUrl}`,
-            forwardVersionHeader: true
-        });
-
         return candidates;
     }
 
     async function rawProxyFetch(targetUrl, init = {}, { versionCode = FALLBACK_VERSION_CODE, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
         const safeInit = init || {};
-        let lastError;
+        const candidates = transportCandidates(targetUrl, versionCode);
+        if (candidates.length === 0) throw new Error(NO_TRANSPORT_MESSAGE);
 
-        for (const candidate of transportCandidates(targetUrl, versionCode)) {
+        let lastError;
+        for (const candidate of candidates) {
             const timeoutController = new AbortController();
             const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
             try {
@@ -162,7 +163,7 @@
             }
         }
 
-        throw lastError || new Error("Нет доступного транспорта к RuStore API");
+        throw lastError || new Error("RuStore API недоступен");
     }
 
     async function getVersionCode() {
@@ -172,8 +173,7 @@
 
         versionCodePromise = (async () => {
             try {
-                const target = `${RUSTORE_ORIGIN}/rustore-info/new-version`;
-                const response = await rawProxyFetch(target, { cache: "no-store" }, {
+                const response = await rawProxyFetch(`${RUSTORE_ORIGIN}/rustore-info/new-version`, { cache: "no-store" }, {
                     versionCode: FALLBACK_VERSION_CODE,
                     timeoutMs: 9000
                 });
@@ -187,6 +187,7 @@
                 writeSessionCache(VERSION_CACHE_KEY, versionCode, 6 * 60 * 60 * 1000);
                 return versionCode;
             } catch (error) {
+                if (getTransportMode() === "unconfigured") return FALLBACK_VERSION_CODE;
                 console.warn(`Не удалось получить версию клиента RuStore. Используется ${FALLBACK_VERSION_CODE}.`, error);
                 return FALLBACK_VERSION_CODE;
             } finally {
@@ -217,7 +218,6 @@
                     versionCode,
                     timeoutMs: options.timeoutMs || DEFAULT_TIMEOUT_MS
                 });
-
                 const text = await response.text();
                 let data;
                 try { data = text ? JSON.parse(text) : {}; }
@@ -231,6 +231,7 @@
             } catch (error) {
                 if (error?.name === "AbortError") throw error;
                 lastError = error;
+                if (String(error?.message || "").includes("нужен серверный транспорт")) break;
                 if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 450));
             }
         }
@@ -259,6 +260,8 @@
 
     const api = {
         getVersionCode,
+        getTransportMode,
+        isConfigured: () => getTransportMode() !== "unconfigured",
 
         search(query, pageNumber = 0, pageSize = 18, signal) {
             const params = new URLSearchParams({ pageNumber: String(pageNumber), pageSize: String(pageSize), query });
