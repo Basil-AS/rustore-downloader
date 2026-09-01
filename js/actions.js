@@ -6,8 +6,7 @@ const PACKAGE_LIKE_RE = /^[a-zA-Z][\w]*(?:\.[\w]*)+$/;
 const SEARCH_PAGE_SIZE = 12;
 const MAX_VISIBLE_PER_PAGE = 8;
 const PACKAGE_PREFIX_PAGE_SIZE = 50;
-const MAX_PACKAGE_PREFIX_PAGES = 8;
-const GENERIC_PACKAGE_PARTS = new Set(["com", "ru", "org", "net", "io", "app", "android"]);
+const MAX_PACKAGE_PREFIX_PAGES = 12;
 
 function normalizeSearch(value) {
     return String(value || "").normalize("NFKC").toLocaleLowerCase("ru-RU").trim();
@@ -56,11 +55,6 @@ function visibleCardCount() {
     return dom.results.querySelectorAll(".app-card").length;
 }
 
-function packagePrefixSeed(prefix) {
-    const parts = normalizeSearch(prefix).replace(/\.$/, "").split(".").filter(Boolean);
-    return [...parts].reverse().find(part => part.length >= 3 && !GENERIC_PACKAGE_PARTS.has(part)) || parts.at(-1) || prefix;
-}
-
 function sortPackagePrefixApps(items) {
     return deduplicateApps(items).sort((a, b) => {
         const ratingDiff = Number(b.averageUserRating || 0) - Number(a.averageUserRating || 0);
@@ -73,8 +67,7 @@ async function searchPackagePrefix(prefix) {
     state.loading = true;
     dom.loadMore.hidden = true;
     const normalizedPrefix = normalizeSearch(prefix);
-    const seed = packagePrefixSeed(prefix);
-    setStatus(`Ищем ${prefix}*…`, "loading");
+    setStatus(`Фильтруем ${prefix}*…`, "loading");
 
     try {
         const signal = state.searchController.signal;
@@ -83,7 +76,7 @@ async function searchPackagePrefix(prefix) {
         let totalPages = 1;
 
         while (page < totalPages && page < MAX_PACKAGE_PREFIX_PAGES) {
-            const response = await api.search(seed, page, PACKAGE_PREFIX_PAGE_SIZE, signal);
+            const response = await api.search(prefix, page, PACKAGE_PREFIX_PAGE_SIZE, signal);
             if (state.query !== prefix || signal.aborted) return;
             const content = Array.isArray(response?.body?.content) ? response.body.content : [];
             matches.push(...content.filter(item => normalizeSearch(item?.packageName).startsWith(normalizedPrefix)));
