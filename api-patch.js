@@ -6,12 +6,10 @@
     const CLOUDFLARE_WORKER_ORIGIN = "https://rustore-downloader.basil-as.workers.dev";
     const CORSPROXY_ORIGIN = "https://corsproxy.io/";
     const FALLBACK_VERSION_CODE = "110802";
-    const VERSION_CACHE_KEY = "rustore:version-code:v7";
-    const RESPONSE_CACHE_PREFIX = "rustore:response:v7:";
+    const VERSION_CACHE_KEY = "rustore:version-code:v8";
+    const RESPONSE_CACHE_PREFIX = "rustore:response:v8:";
     const DEFAULT_TIMEOUT_MS = 18000;
     const NO_TRANSPORT_MESSAGE = "Для доступа к RuStore API нужен серверный транспорт. Используйте Cloudflare Workers/Pages, Vercel или укажите CorsProxy API key.";
-
-    let versionCodePromise = null;
 
     function readSessionCache(key) {
         try {
@@ -141,24 +139,8 @@
     async function getVersionCode() {
         const cached = readSessionCache(VERSION_CACHE_KEY);
         if (cached) return cached;
-        if (versionCodePromise) return versionCodePromise;
-        versionCodePromise = (async () => {
-            try {
-                const response = await rawProxyFetch(`${RUSTORE_ORIGIN}/rustore-info/new-version`, { cache: "no-store" }, { versionCode: FALLBACK_VERSION_CODE, timeoutMs: 9000 });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const data = await response.json();
-                const value = data?.body?.latestVersion;
-                if (!value) throw new Error("latestVersion отсутствует в ответе RuStore");
-                const versionCode = String(value);
-                writeSessionCache(VERSION_CACHE_KEY, versionCode, 6 * 60 * 60 * 1000);
-                return versionCode;
-            } catch (error) {
-                if (getTransportMode() === "unconfigured") return FALLBACK_VERSION_CODE;
-                console.warn(`Не удалось получить версию клиента RuStore. Используется ${FALLBACK_VERSION_CODE}.`, error);
-                return FALLBACK_VERSION_CODE;
-            } finally { versionCodePromise = null; }
-        })();
-        return versionCodePromise;
+        writeSessionCache(VERSION_CACHE_KEY, FALLBACK_VERSION_CODE, 6 * 60 * 60 * 1000);
+        return FALLBACK_VERSION_CODE;
     }
 
     async function request(path, init = {}, options = {}) {
@@ -211,7 +193,7 @@
         getVersionCode,
         getTransportMode,
         isConfigured: () => getTransportMode() !== "unconfigured",
-        search(query, pageNumber = 0, pageSize = 18, signal) {
+        search(query, pageNumber = 0, pageSize = 12, signal) {
             const params = new URLSearchParams({ pageNumber: String(pageNumber), pageSize: String(pageSize), query });
             return request(`/applicationData/apps?${params}`, { signal }, { cacheTtlMs: 2 * 60 * 1000 });
         },
