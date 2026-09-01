@@ -1,5 +1,7 @@
 export const api = window.RuStoreApi;
 export const PACKAGE_RE = /^[a-zA-Z][\w]*(?:\.[\w]+)+$/;
+export const PACKAGE_PREFIX_RE = /^[a-zA-Z][\w]*(?:\.[\w]+)+\.$/;
+export const PACKAGE_LIKE_RE = /^[a-zA-Z][\w]*(?:\.[\w]*)+$/;
 export const detailsCache = new Map();
 export const state = {
     query: "", page: 0, totalPages: 0, loading: false,
