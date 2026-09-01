@@ -1,7 +1,9 @@
 import { $, dom, state, PACKAGE_RE } from "./common.js";
 import { setStatus, emptyState, hideModal, openPreview, updatePreview } from "./render.js";
-import { searchApps, getDetails, showDetails, showVersions, showComments, downloadApp, updateSuggestions, screenshots } from "./actions.js?v=20260901-10";
+import { searchApps, getDetails, showDetails, showVersions, showComments, downloadApp, updateSuggestions, screenshots } from "./actions.js?v=20260901-11";
 
+const PACKAGE_PREFIX_RE = /^[a-zA-Z][\w]*(?:\.[\w]+)+\.$/;
+const PACKAGE_LIKE_RE = /^[a-zA-Z][\w]*(?:\.[\w]*)+$/;
 let searchTimer;
 let suggestionTimer;
 
@@ -41,7 +43,7 @@ function closeSuggestions({ abort = true } = {}) {
 
 function scheduleSuggestions(query, delay = 180) {
     clearTimeout(suggestionTimer);
-    if (query.length < 2 || PACKAGE_RE.test(query)) {
+    if (query.length < 2 || PACKAGE_LIKE_RE.test(query)) {
         closeSuggestions();
         return;
     }
@@ -70,7 +72,7 @@ dom.searchInput.addEventListener("input", () => {
         state.query = "";
         closeSuggestions();
         if (transportReady()) {
-            emptyState("Введите название приложения", "Можно искать по названию или идентификатору пакета Android.");
+            emptyState("Введите название приложения", "Можно искать по названию, точному package name или префиксу пакета с точкой на конце.");
         } else {
             emptyState("Нужен серверный транспорт", "GitHub Pages использует подключённый Cloudflare Worker для доступа к RuStore API.");
         }
@@ -79,12 +81,12 @@ dom.searchInput.addEventListener("input", () => {
     }
 
     scheduleSuggestions(query);
-    scheduleSearch(query, PACKAGE_RE.test(query) ? 350 : 550);
+    scheduleSearch(query, PACKAGE_RE.test(query) || PACKAGE_PREFIX_RE.test(query) ? 350 : 550);
 });
 
 dom.searchInput.addEventListener("focus", () => {
     const query = dom.searchInput.value.trim();
-    if (query.length >= 2 && !PACKAGE_RE.test(query)) scheduleSuggestions(query, 80);
+    if (query.length >= 2 && !PACKAGE_LIKE_RE.test(query)) scheduleSuggestions(query, 80);
 });
 
 dom.searchInput.addEventListener("keydown", event => {
