@@ -10,7 +10,9 @@ function transportReady() {
 
 function transportLabel(mode) {
     return ({
+        "cloudflare-workers": "Cloudflare Workers",
         "cloudflare-pages": "Cloudflare Pages",
+        "github-pages-via-cloudflare": "GitHub Pages + Cloudflare",
         "vercel": "Vercel",
         "same-origin": "Same-origin API",
         "custom-worker": "Cloudflare Worker",
@@ -27,6 +29,14 @@ function resetStatus() {
     }
 }
 
+function closeSuggestions({ abort = true } = {}) {
+    if (abort) {
+        state.suggestionController?.abort();
+        state.suggestionController = null;
+    }
+    dom.suggestions.hidden = true;
+}
+
 dom.searchInput.addEventListener("input", () => {
     const query = dom.searchInput.value.trim();
     dom.clearSearch.classList.toggle("hidden", !query);
@@ -34,7 +44,7 @@ dom.searchInput.addEventListener("input", () => {
     if (!query) {
         state.searchController?.abort();
         state.query = "";
-        dom.suggestions.hidden = true;
+        closeSuggestions();
         if (transportReady()) {
             emptyState("Введите название приложения", "Можно искать по названию или идентификатору пакета Android.");
         } else {
@@ -50,8 +60,11 @@ dom.searchInput.addEventListener("input", () => {
 dom.searchInput.addEventListener("keydown", event => {
     if (event.key === "Enter") {
         clearTimeout(debounceTimer);
-        dom.suggestions.hidden = true;
+        closeSuggestions();
         searchApps(dom.searchInput.value);
+    } else if (event.key === "Escape") {
+        closeSuggestions();
+        dom.searchInput.blur();
     }
 });
 
@@ -65,11 +78,13 @@ dom.suggestions.addEventListener("click", event => {
     const button = event.target.closest("[data-suggestion]");
     if (!button) return;
     dom.searchInput.value = button.dataset.suggestion;
-    dom.suggestions.hidden = true;
+    closeSuggestions();
     searchApps(dom.searchInput.value);
 });
 
 document.addEventListener("click", async event => {
+    if (!event.target.closest(".search-control")) closeSuggestions();
+
     const example = event.target.closest("[data-example]");
     if (example) {
         dom.searchInput.value = example.dataset.example;
@@ -107,7 +122,12 @@ document.querySelectorAll(".modal-close").forEach(button => button.addEventListe
 document.querySelectorAll(".modal").forEach(modal => modal.addEventListener("click", event => { if (event.target === modal) hideModal(modal); }));
 $("#prevImage").addEventListener("click", () => { state.imageIndex = Math.max(0, state.imageIndex - 1); updatePreview(); });
 $("#nextImage").addEventListener("click", () => { state.imageIndex = Math.min(state.images.length - 1, state.imageIndex + 1); updatePreview(); });
-document.addEventListener("keydown", event => { if (event.key === "Escape") document.querySelectorAll(".modal.show").forEach(hideModal); });
+document.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+        closeSuggestions();
+        document.querySelectorAll(".modal.show").forEach(hideModal);
+    }
+});
 $("#commentsFilterOption").addEventListener("change", event => {
     const packageName = $("#commentsModal").dataset.package;
     if (packageName) showComments(packageName, event.target.value);
