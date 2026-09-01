@@ -33,11 +33,9 @@ jobs:
           set -euo pipefail
           test -f index.html
           test -f api-patch.js
-          test -f proxy-fallback.js
           test -f LICENSE
           test -f NOTICE
           node --check api-patch.js
-          node --check proxy-fallback.js
           node --check worker/worker.js
           find js -name '*.js' -print0 | xargs -0 -n1 node --check
           test ! -e script.js
@@ -47,7 +45,7 @@ jobs:
             exit 1
           fi
 
-      - name: Test API proxy URL construction
+      - name: Test RuStore browser transport
         shell: bash
         run: |
           node --input-type=module <<'NODE'
@@ -64,31 +62,39 @@ jobs:
             };
           }
 
+          const prefix = 'https://test.cors.workers.dev/?';
           const calls = [];
           const mockFetch = async (input, init = {}) => {
             const url = String(input);
             calls.push({ url, init });
-
-            const proxy = new URL(url);
-            const target = proxy.searchParams.get('url') || '';
+            const target = url.startsWith(prefix) ? url.slice(prefix.length) : url;
 
             if (target.endsWith('/rustore-info/new-version')) {
               return new Response(JSON.stringify({
                 code: 'OK',
-                body: { latestVersion: 13000 }
-              }), {
-                status: 200,
-                headers: { 'Content-Type': 'application/json' }
-              });
+                body: { latestVersion: 110802 }
+              }), { status: 200, headers: { 'Content-Type': 'application/json' } });
             }
 
-            return new Response(JSON.stringify({
-              code: 'OK',
-              body: { content: [{ appId: 1, packageName: 'com.vkontakte.android' }] }
-            }), {
-              status: 200,
-              headers: { 'Content-Type': 'application/json' }
-            });
+            if (target.includes('/applicationData/apps?')) {
+              return new Response(JSON.stringify({
+                code: 'OK',
+                body: {
+                  content: [{ appId: 1, packageName: 'com.vkontakte.android' }],
+                  totalElements: 1,
+                  totalPages: 1
+                }
+              }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+            }
+
+            if (target.endsWith('/applicationData/v2/download-link')) {
+              return new Response(JSON.stringify({
+                code: 'OK',
+                body: { downloadUrls: [{ url: 'https://static.rustore.ru/example.apk' }] }
+              }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+            }
+
+            throw new Error(`Unexpected URL: ${url}`);
           };
 
           const window = {
@@ -115,92 +121,28 @@ jobs:
             JSON
           });
 
-          vm.runInContext(fs.readFileSync('api-patch.js', 'utf8'), context, {
-            filename: 'api-patch.js'
-          });
+          vm.runInContext(fs.readFileSync('api-patch.js', 'utf8'), context, { filename: 'api-patch.js' });
 
-          const result = await window.RuStoreApi.search('VK');
-          assert.equal(result.code, 'OK');
+          const search = await window.RuStoreApi.search('VK');
+          assert.equal(search.code, 'OK');
           assert.equal(calls.length, 2);
+          assert.ok(calls[0].url.startsWith(prefix + 'https://backapi.rustore.ru/rustore-info/new-version'));
+          assert.equal(new Headers(calls[0].init.headers).get('ruStoreVerCode'), '110802');
+          assert.ok(calls[1].url.startsWith(prefix + 'https://backapi.rustore.ru/applicationData/apps?'));
+          assert.ok(calls[1].url.includes('query=VK'));
+          assert.equal(new Headers(calls[1].init.headers).get('ruStoreVerCode'), '110802');
 
-          const versionRequest = new URL(calls[0].url);
-          assert.equal(versionRequest.origin, 'https://corsproxy.io');
-          assert.ok(versionRequest.searchParams.get('url').endsWith('/rustore-info/new-version'));
-          assert.ok(versionRequest.searchParams.getAll('reqHeaders').includes('ruStoreVerCode:12000'));
+          const download = await window.RuStoreApi.downloadV2(1);
+          assert.equal(download.code, 'OK');
+          assert.equal(calls.length, 3);
+          assert.ok(calls[2].url.startsWith(prefix + 'https://backapi.rustore.ru/applicationData/v2/download-link'));
+          const headers = new Headers(calls[2].init.headers);
+          assert.equal(headers.get('ruStoreVerCode'), '110802');
+          assert.match(headers.get('Content-Type') || '', /^application\/json/);
+          assert.equal(calls[2].init.method, 'POST');
+          assert.match(String(calls[2].init.body), /"withoutSplits":false/);
 
-          const searchRequest = new URL(calls[1].url);
-          assert.ok(searchRequest.searchParams.get('url').includes('/applicationData/apps?'));
-          assert.ok(searchRequest.searchParams.get('url').includes('query=VK'));
-          assert.ok(searchRequest.searchParams.getAll('reqHeaders').includes('ruStoreVerCode:13000'));
-
-          console.log('API proxy construction: OK');
-          NODE
-
-      - name: Test CorsProxy fallback
-        shell: bash
-        run: |
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict';
-          import fs from 'node:fs';
-          import vm from 'node:vm';
-
-          const calls = [];
-          const originalFetch = async (input, init = {}) => {
-            calls.push({ input, init });
-            return calls.length === 1
-              ? new Response('header override rejected', { status: 403 })
-              : new Response(JSON.stringify({ code: 'OK' }), {
-                  status: 200,
-                  headers: { 'Content-Type': 'application/json' }
-                });
-          };
-
-          const window = {
-            location: { href: 'https://basil-as.github.io/rustore-downloader/' },
-            fetch: originalFetch
-          };
-
-          const context = vm.createContext({
-            window,
-            URL,
-            Headers,
-            Request,
-            Response,
-            console
-          });
-
-          vm.runInContext(fs.readFileSync('proxy-fallback.js', 'utf8'), context, {
-            filename: 'proxy-fallback.js'
-          });
-
-          const target = 'https://backapi.rustore.ru/applicationData/v2/download-link';
-          const proxy = new URL('https://corsproxy.io/');
-          proxy.searchParams.set('url', target);
-          proxy.searchParams.append('reqHeaders', 'ruStoreVerCode:13000');
-          proxy.searchParams.append('reqHeaders', 'Accept:application/json');
-
-          const body = JSON.stringify({ appId: 42 });
-          const response = await window.fetch(proxy.toString(), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body
-          });
-
-          assert.equal(response.status, 200);
-          assert.equal(calls.length, 2);
-
-          const fallbackUrl = new URL(String(calls[1].input));
-          assert.equal(fallbackUrl.origin, 'https://corsproxy.io');
-          assert.equal(fallbackUrl.searchParams.get('url'), target);
-          assert.equal(fallbackUrl.searchParams.has('reqHeaders'), false);
-
-          const headers = new Headers(calls[1].init.headers);
-          assert.equal(headers.get('ruStoreVerCode'), '13000');
-          assert.equal(headers.get('Accept'), 'application/json');
-          assert.equal(calls[1].init.method, 'POST');
-          assert.equal(calls[1].init.body, body);
-
-          console.log('CorsProxy fallback: OK');
+          console.log('RuStore browser transport: OK');
           NODE
 
   live-smoke:
@@ -214,23 +156,16 @@ jobs:
           node-version: 22
 
       - name: Optional live RuStore request
-        env:
-          TEST_ORIGIN: https://basil-as.github.io
         shell: bash
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
 
           const target = 'https://backapi.rustore.ru/applicationData/overallInfo/com.vkontakte.android';
-          const proxy = new URL('https://corsproxy.io/');
-          proxy.searchParams.set('url', target);
-          proxy.searchParams.append('reqHeaders', 'ruStoreVerCode:12000');
-          proxy.searchParams.append('reqHeaders', 'Accept:application/json');
-
-          const response = await fetch(proxy, {
+          const response = await fetch(`https://test.cors.workers.dev/?${target}`, {
             headers: {
-              Origin: process.env.TEST_ORIGIN,
-              Accept: 'application/json'
+              Accept: 'application/json',
+              ruStoreVerCode: '110802'
             },
             signal: AbortSignal.timeout(25_000)
           });
