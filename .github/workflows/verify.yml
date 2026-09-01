@@ -83,7 +83,7 @@ jobs:
           assert.equal(preflight.headers.get('Access-Control-Allow-Origin'), origin);
 
           const response = await worker.fetch(new Request(
-            'https://rustore-downloader.basil-as.workers.dev/api/applicationData/apps?pageNumber=0&pageSize=18&query=VK',
+            'https://rustore-downloader.basil-as.workers.dev/api/applicationData/apps?pageNumber=0&pageSize=12&query=VK',
             { headers: { Origin: origin, ruStoreVerCode: '110802', Accept: 'application/json' } }
           ), env);
           assert.equal(response.status, 200);
@@ -123,9 +123,6 @@ jobs:
           const mockFetch = async (input, init = {}) => {
             const url = String(input);
             calls.push({ url, init });
-            if (url === `${base}/api/rustore-info/new-version`) {
-              return Response.json({ code: 'OK', body: { latestVersion: 110802 } });
-            }
             if (url.startsWith(`${base}/api/applicationData/apps?`)) {
               return Response.json({ code: 'OK', body: { content: [], totalElements: 0, totalPages: 0 } });
             }
@@ -151,10 +148,12 @@ jobs:
           assert.equal(window.RuStoreApi.isConfigured(), true);
           const result = await window.RuStoreApi.search('VK');
           assert.equal(result.code, 'OK');
-          assert.equal(calls[0].url, `${base}/api/rustore-info/new-version`);
-          assert.match(calls[1].url, /^https:\/\/rustore-downloader\.basil-as\.workers\.dev\/api\/applicationData\/apps\?/);
-          assert.equal(new Headers(calls[1].init.headers).get('ruStoreVerCode'), '110802');
-          console.log('GitHub Pages -> Cloudflare: OK');
+          assert.equal(calls.length, 1);
+          assert.match(calls[0].url, /^https:\/\/rustore-downloader\.basil-as\.workers\.dev\/api\/applicationData\/apps\?/);
+          assert.match(calls[0].url, /pageSize=12/);
+          assert.equal(new Headers(calls[0].init.headers).get('ruStoreVerCode'), '110802');
+          assert.equal(calls.some(call => call.url.includes('/rustore-info/new-version')), false);
+          console.log('GitHub Pages -> Cloudflare efficient transport: OK');
           NODE
 
       - name: Test unknown static host fails clearly
