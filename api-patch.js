@@ -29,10 +29,7 @@
 
     function writeSessionCache(key, value, ttlMs) {
         try {
-            sessionStorage.setItem(key, JSON.stringify({
-                value,
-                expiresAt: Date.now() + ttlMs
-            }));
+            sessionStorage.setItem(key, JSON.stringify({ value, expiresAt: Date.now() + ttlMs }));
         } catch {
             // The application still works when storage is unavailable.
         }
@@ -72,8 +69,29 @@
             : `${template}${template.includes("?") ? "&" : "?"}url=${encodeURIComponent(targetUrl)}`;
     }
 
+    function canUseSameOriginProxy() {
+        return Boolean(
+            window.RUSTORE_USE_SAME_ORIGIN_PROXY ||
+            window.location.hostname.endsWith(".vercel.app")
+        );
+    }
+
+    function sameOriginProxyUrl(targetUrl) {
+        const target = new URL(targetUrl);
+        return `/api${target.pathname}${target.search}`;
+    }
+
     function transportCandidates(targetUrl, versionCode) {
         const candidates = [];
+
+        if (canUseSameOriginProxy()) {
+            candidates.push({
+                name: "same-origin-api",
+                url: sameOriginProxyUrl(targetUrl),
+                forwardVersionHeader: true
+            });
+        }
+
         const custom = customProxyTemplate();
         if (custom) {
             candidates.push({
@@ -97,8 +115,8 @@
             });
         }
 
-        // Emergency public fallback. It supports GET/POST and forwards custom headers.
-        // A self-hosted Worker is still preferred for stable production use.
+        // Emergency fallback for static hosts such as GitHub Pages.
+        // A first-party Vercel rewrite or self-hosted Worker is preferred for production.
         candidates.push({
             name: "public-worker-fallback",
             url: `${EMERGENCY_PROXY}${targetUrl}`,
@@ -127,10 +145,7 @@
                     referrerPolicy: "no-referrer"
                 });
 
-                if (response.ok || ![401, 403, 429, 502, 503, 504].includes(response.status)) {
-                    return response;
-                }
-
+                if (response.ok || ![401, 403, 429, 502, 503, 504].includes(response.status)) return response;
                 lastError = new Error(`${candidate.name}: HTTP ${response.status}`);
             } catch (error) {
                 if (safeInit.signal?.aborted) throw error;
@@ -198,18 +213,11 @@
 
                 const text = await response.text();
                 let data;
-                try {
-                    data = text ? JSON.parse(text) : {};
-                } catch {
-                    throw new Error(`RuStore вернул не JSON: ${text.slice(0, 180)}`);
-                }
+                try { data = text ? JSON.parse(text) : {}; }
+                catch { throw new Error(`RuStore вернул не JSON: ${text.slice(0, 180)}`); }
 
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${data?.message || data?.error?.message || "ошибка запроса"}`);
-                }
-                if (data?.code && data.code !== "OK") {
-                    throw new Error(data.message || `RuStore API: ${data.code}`);
-                }
+                if (!response.ok) throw new Error(`HTTP ${response.status}: ${data?.message || data?.error?.message || "ошибка запроса"}`);
+                if (data?.code && data.code !== "OK") throw new Error(data.message || `RuStore API: ${data.code}`);
 
                 if (cacheTtlMs > 0) writeSessionCache(cacheKey, data, cacheTtlMs);
                 return data;
@@ -246,42 +254,28 @@
         getVersionCode,
 
         search(query, pageNumber = 0, pageSize = 18, signal) {
-            const params = new URLSearchParams({
-                pageNumber: String(pageNumber),
-                pageSize: String(pageSize),
-                query
-            });
+            const params = new URLSearchParams({ pageNumber: String(pageNumber), pageSize: String(pageSize), query });
             return request(`/applicationData/apps?${params}`, { signal }, { cacheTtlMs: 2 * 60 * 1000 });
         },
 
         async suggest(query, signal) {
-            try {
-                return await publicSuggest(query, signal);
-            } catch {
+            try { return await publicSuggest(query, signal); }
+            catch {
                 const params = new URLSearchParams({ query });
                 return request(`/search/suggest?${params}`, { signal }, { cacheTtlMs: 10 * 60 * 1000 });
             }
         },
 
         info(packageName, signal) {
-            return request(`/applicationData/overallInfo/${encodeURIComponent(packageName)}`, { signal }, {
-                cacheTtlMs: 15 * 60 * 1000
-            });
+            return request(`/applicationData/overallInfo/${encodeURIComponent(packageName)}`, { signal }, { cacheTtlMs: 15 * 60 * 1000 });
         },
 
         versionHistory(appId, signal) {
-            return request(`/applicationData/allAppVersionWhatsNew/${encodeURIComponent(appId)}`, { signal }, {
-                cacheTtlMs: 15 * 60 * 1000
-            });
+            return request(`/applicationData/allAppVersionWhatsNew/${encodeURIComponent(appId)}`, { signal }, { cacheTtlMs: 15 * 60 * 1000 });
         },
 
         comments(packageName, sortBy = "NEW_FIRST", pageNumber = 0, pageSize = 20, signal) {
-            const params = new URLSearchParams({
-                packageName,
-                sortBy,
-                pageNumber: String(pageNumber),
-                pageSize: String(pageSize)
-            });
+            const params = new URLSearchParams({ packageName, sortBy, pageNumber: String(pageNumber), pageSize: String(pageSize) });
             return request(`/comment/comment?${params}`, { signal }, { cacheTtlMs: 3 * 60 * 1000 });
         },
 
