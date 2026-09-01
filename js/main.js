@@ -3,6 +3,20 @@ import { setStatus, emptyState, hideModal, openPreview, updatePreview } from "./
 import { searchApps, getDetails, showDetails, showVersions, showComments, downloadApp, updateSuggestions, screenshots } from "./actions.js";
 
 let debounceTimer;
+
+function transportReady() {
+    return Boolean(window.RuStoreApi?.isConfigured?.());
+}
+
+function resetStatus() {
+    if (transportReady()) {
+        const mode = window.RuStoreApi.getTransportMode?.() || "api";
+        setStatus(`API подключён: ${mode}`, "ok");
+    } else {
+        setStatus("Нужен API-прокси", "error");
+    }
+}
+
 dom.searchInput.addEventListener("input", () => {
     const query = dom.searchInput.value.trim();
     dom.clearSearch.classList.toggle("hidden", !query);
@@ -11,8 +25,12 @@ dom.searchInput.addEventListener("input", () => {
         state.searchController?.abort();
         state.query = "";
         dom.suggestions.hidden = true;
-        emptyState("Введите название приложения", "Можно искать по названию или идентификатору пакета Android.");
-        setStatus("Готов к поиску");
+        if (transportReady()) {
+            emptyState("Введите название приложения", "Можно искать по названию или идентификатору пакета Android.");
+        } else {
+            emptyState("Нужен серверный транспорт", "GitHub Pages не может напрямую отправлять обязательный ruStoreVerCode в RuStore API. Используйте Vercel-деплой, собственный Worker или CorsProxy API key.");
+        }
+        resetStatus();
         return;
     }
     updateSuggestions(query);
@@ -84,4 +102,8 @@ $("#commentsFilterOption").addEventListener("change", event => {
     const packageName = $("#commentsModal").dataset.package;
     if (packageName) showComments(packageName, event.target.value);
 });
-setStatus("Готов к поиску");
+
+resetStatus();
+if (!transportReady()) {
+    emptyState("Нужен серверный транспорт", "Для полного поиска и получения APK разверните этот репозиторий в Vercel либо подключите собственный Cloudflare Worker. Код уже подготовлен.");
+}
