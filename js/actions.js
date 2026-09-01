@@ -223,13 +223,21 @@ export async function updateSuggestions(query) {
         if (controller.signal.aborted || dom.searchInput.value.trim() !== query || document.activeElement !== dom.searchInput) return;
         const raw = response?.body?.content || response?.body || [];
         const seen = new Set();
-        const values = (Array.isArray(raw) ? raw : [])
-            .map(item => typeof item === "string" ? item : item?.text || item?.suggestion || item?.query)
-            .map(value => String(value || "").trim())
-            .filter(value => value && !seen.has(value.toLocaleLowerCase("ru-RU")) && seen.add(value.toLocaleLowerCase("ru-RU")))
+        const suggestions = (Array.isArray(raw) ? raw : [])
+            .map(item => typeof item === "string"
+                ? { text: item, packageName: "" }
+                : { text: item?.text || item?.suggestion || item?.query || "", packageName: item?.packageName || "" })
+            .map(item => ({ text: String(item.text || "").trim(), packageName: String(item.packageName || "").trim() }))
+            .filter(item => {
+                if (!item.text) return false;
+                const key = normalizeSearch(item.packageName || item.text);
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            })
             .slice(0, 5);
-        dom.suggestions.innerHTML = values.map(value => `<button type="button" data-suggestion="${escapeHtml(value)}">${escapeHtml(value)}</button>`).join("");
-        dom.suggestions.hidden = !values.length;
+        dom.suggestions.innerHTML = suggestions.map(item => `<button type="button" data-suggestion="${escapeHtml(item.text)}"${item.packageName ? ` data-suggestion-package="${escapeHtml(item.packageName)}"` : ""}>${escapeHtml(item.text)}</button>`).join("");
+        dom.suggestions.hidden = !suggestions.length;
     } catch (error) {
         if (error?.name !== "AbortError") dom.suggestions.hidden = true;
     }
