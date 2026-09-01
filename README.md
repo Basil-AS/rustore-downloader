@@ -4,52 +4,35 @@
 
 **Поиск приложений RuStore по названию или package name и получение прямых оригинальных ссылок на APK.**
 
-[![Open Web App](https://img.shields.io/badge/Open_Web_App-5B4FD8?style=for-the-badge&logo=githubpages&logoColor=white)](https://basil-as.github.io/rustore-downloader/)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FBasil-AS%2Frustore-downloader)
+
 [![Vanilla JavaScript](https://img.shields.io/badge/Vanilla_JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=111)](https://github.com/Basil-AS/rustore-downloader)
 [![MIT License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](./LICENSE)
 [![Verify web app](https://github.com/Basil-AS/rustore-downloader/actions/workflows/verify.yml/badge.svg)](https://github.com/Basil-AS/rustore-downloader/actions/workflows/verify.yml)
-
-### [Открыть веб-приложение →](https://basil-as.github.io/rustore-downloader/)
 
 </div>
 
 ## Возможности
 
-- поиск по обычному названию приложения;
-- точный поиск по package name, например `com.vkontakte.android`;
-- автодополнение поискового запроса;
-- просмотр версии, размера, минимальной версии Android, описания, скриншотов, истории версий и отзывов;
-- получение APK или набора Split APK, возвращённых RuStore;
-- автоматическое получение актуального `ruStoreVerCode` с рабочим резервным значением;
-- кэширование ответов в `sessionStorage`, отмена устаревших запросов, повторные попытки и тайм-ауты;
-- ограниченная параллельная загрузка карточек;
-- интерфейс без фреймворков и тяжёлых зависимостей.
+- поиск по названию приложения и package name;
+- автодополнение через публичный веб-API RuStore;
+- карточка приложения, версия, размер, Android SDK, описание, скриншоты, история версий и отзывы;
+- получение APK или Split APK через актуальный `v2/download-link` с fallback на v1;
+- актуальный `ruStoreVerCode`, резервное значение `110802`;
+- кэширование, отмена устаревших запросов, retry и timeout;
+- несколько вариантов транспорта к RuStore API.
 
-## Использование
+## Почему чистого GitHub Pages недостаточно
 
-1. Откройте **[RuStore APK Downloader](https://basil-as.github.io/rustore-downloader/)**.
-2. Введите название приложения или package name.
-3. Выберите приложение.
-4. Нажмите **«Скачать APK»**.
+RuStore требует нестандартный заголовок `ruStoreVerCode` для запросов к `backapi.rustore.ru`. Браузер с полностью статического GitHub Pages упирается в CORS, поэтому **полный поиск карточек и получение APK требуют server-side/edge транспорта**.
 
-## Почему нужен серверный транспорт
+Ранее проект использовал анонимный `corsproxy.io`, но этот вариант больше не является рабочей схемой без API key. Проверенный публичный demo Worker также нельзя использовать как production-прокси. Поэтому в проекте больше нет ложного публичного fallback.
 
-Внутренний API пользовательского клиента RuStore требует нестандартный заголовок `ruStoreVerCode`. Обычный браузерный запрос с GitHub Pages не может надёжно отправлять его непосредственно в `backapi.rustore.ru` из-за CORS.
+## Рекомендуемый вариант — Vercel
 
-Старая версия проекта использовала анонимный `corsproxy.io`. Этот вариант больше не считается рабочей схемой: для CorsProxy нужен API key, поэтому проект больше не зависит от него по умолчанию.
+Нажмите кнопку **Deploy with Vercel** вверху README и импортируйте репозиторий. Никакой отдельный backend писать не требуется.
 
-Текущая последовательность транспорта:
-
-1. **Vercel same-origin `/api`** — при размещении проекта на `*.vercel.app`; файл [`vercel.json`](./vercel.json) уже содержит rewrite на RuStore API.
-2. **Собственный Cloudflare Worker** — если задан `rustoreProxyUrl`.
-3. **CorsProxy с собственным API key** — если задан `rustoreCorsProxyKey`.
-4. **Публичный Worker только как аварийный fallback для GitHub Pages.** Для постоянного production-размещения лучше использовать первые два варианта.
-
-APK после получения временной ссылки скачивается напрямую с CDN RuStore и не проксируется через проект.
-
-## Рекомендуемый деплой: Vercel
-
-В репозитории уже есть `vercel.json`:
+Файл [`vercel.json`](./vercel.json) уже содержит rewrite:
 
 ```json
 {
@@ -62,47 +45,55 @@ APK после получения временной ссылки скачива
 }
 ```
 
-При импорте репозитория в Vercel дополнительный backend писать не требуется: браузер обращается к `/api/...` на том же origin, а Vercel пересылает запрос в RuStore. Код автоматически выбирает этот транспорт на домене `*.vercel.app`.
+На `*.vercel.app` приложение автоматически выбирает same-origin `/api`, поэтому браузер больше не сталкивается с CORS RuStore.
 
 ## Собственный Cloudflare Worker
 
-Worker находится в каталоге [`worker`](./worker):
+Готовый ограниченный proxy находится в [`worker/worker.js`](./worker/worker.js):
 
 ```bash
 cd worker
 npx wrangler deploy
 ```
 
-После деплоя укажите адрес Worker в браузере:
+После деплоя укажите URL в браузере:
 
 ```js
 localStorage.setItem(
   "rustoreProxyUrl",
   "https://YOUR-WORKER.workers.dev/?url={url}"
 );
+location.reload();
 ```
 
-Вернуться к автоматическому выбору транспорта:
+Сбросить настройку:
 
 ```js
 localStorage.removeItem("rustoreProxyUrl");
+location.reload();
 ```
 
-Worker ограничивает target только доменом `backapi.rustore.ru` и разрешённым набором API endpoints.
+Worker принимает только разрешённые RuStore endpoints и сам добавляет `ruStoreVerCode`.
 
-## CorsProxy со своим ключом
+## CorsProxy с собственным API key
 
-Поддержка сохранена для пользователей CorsProxy:
+Поддерживается как дополнительный вариант:
 
 ```js
 localStorage.setItem("rustoreCorsProxyKey", "YOUR_API_KEY");
+location.reload();
 ```
 
-Удалить настройку:
+Сброс:
 
 ```js
 localStorage.removeItem("rustoreCorsProxyKey");
+location.reload();
 ```
+
+## GitHub Pages
+
+Страница `https://basil-as.github.io/rustore-downloader/` остаётся статическим frontend/demo. Без настроенного Worker или CorsProxy key она явно покажет, что API-транспорт отсутствует, вместо зависания или неинформативной ошибки.
 
 ## Локальный запуск
 
@@ -110,20 +101,20 @@ localStorage.removeItem("rustoreCorsProxyKey");
 python -m http.server 8080
 ```
 
-Откройте `http://localhost:8080`.
+Для полного функционала локально также задайте `rustoreProxyUrl` либо используйте локальный reverse proxy.
 
 ## Ограничения
 
-- Используется неофициально документированный внутренний API пользовательского клиента RuStore; он может измениться без предупреждения.
-- Обычно через download endpoint доступна последняя опубликованная версия приложения.
-- Временные ссылки RuStore могут истечь.
-- GitHub Pages является полностью статическим хостингом, поэтому стабильная работа зависит от внешнего транспорта; для постоянной эксплуатации рекомендуется Vercel rewrite или собственный Worker.
-- Проект не связан с VK, RuStore или разработчиками приложений.
+- используется внутренний, официально не документированный API пользовательского клиента RuStore;
+- RuStore может менять endpoints, обязательные заголовки и payload без предупреждения;
+- обычно download endpoint выдаёт последнюю опубликованную версию;
+- временные CDN-ссылки могут истечь;
+- проект не связан с VK или RuStore.
 
 ## Лицензия
 
-Код распространяется по лицензии [MIT](./LICENSE). Атрибуция и сведения о происхождении приведены в файле [NOTICE](./NOTICE).
+Код распространяется по [MIT License](./LICENSE). Сведения о происхождении и атрибуция находятся в [NOTICE](./NOTICE).
 
 ## Происхождение
 
-Проект основан на интерфейсе [`kolya00736/rustore-downloader`](https://github.com/kolya00736/rustore-downloader). Текущая реализация существенно переработана: восстановлена работа с актуальными требованиями RuStore API, добавлены поиск по package name, несколько транспортов API, поддержка Split APK, оптимизация запросов и обновлённый интерфейс.
+Проект основан на интерфейсе [`kolya00736/rustore-downloader`](https://github.com/kolya00736/rustore-downloader). Текущая реализация существенно переработана: обновлён RuStore API transport, добавлены поиск по package name, Split APK, Vercel/Worker transport, оптимизация запросов и новый интерфейс.
