@@ -5,10 +5,10 @@
     const PUBLIC_WEB_ORIGIN = "https://api.rustore.ru";
     const CORSPROXY_ORIGIN = "https://corsproxy.io/";
     const FALLBACK_VERSION_CODE = "110802";
-    const VERSION_CACHE_KEY = "rustore:version-code:v5";
-    const RESPONSE_CACHE_PREFIX = "rustore:response:v5:";
+    const VERSION_CACHE_KEY = "rustore:version-code:v6";
+    const RESPONSE_CACHE_PREFIX = "rustore:response:v6:";
     const DEFAULT_TIMEOUT_MS = 18000;
-    const NO_TRANSPORT_MESSAGE = "Для доступа к RuStore API нужен серверный транспорт. Разверните проект в Cloudflare Pages, Vercel, настройте собственный Cloudflare Worker или укажите CorsProxy API key.";
+    const NO_TRANSPORT_MESSAGE = "Для доступа к RuStore API нужен серверный транспорт. Разверните проект в Cloudflare Workers/Pages, Vercel, настройте собственный Worker или укажите CorsProxy API key.";
 
     let versionCodePromise = null;
 
@@ -73,6 +73,7 @@
     function sameOriginPlatform() {
         if (window.RUSTORE_USE_SAME_ORIGIN_PROXY) return "same-origin";
         const hostname = currentHostname();
+        if (hostname.endsWith(".workers.dev")) return "cloudflare-workers";
         if (hostname.endsWith(".pages.dev")) return "cloudflare-pages";
         if (hostname.endsWith(".vercel.app")) return "vercel";
         return "";
