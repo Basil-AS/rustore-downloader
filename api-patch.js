@@ -69,10 +69,17 @@
             : `${template}${template.includes("?") ? "&" : "?"}url=${encodeURIComponent(targetUrl)}`;
     }
 
+    function currentHostname() {
+        const direct = String(window.location?.hostname || "").trim();
+        if (direct) return direct;
+        try { return new URL(String(window.location?.href || "")).hostname; }
+        catch { return ""; }
+    }
+
     function canUseSameOriginProxy() {
         return Boolean(
             window.RUSTORE_USE_SAME_ORIGIN_PROXY ||
-            window.location.hostname.endsWith(".vercel.app")
+            currentHostname().endsWith(".vercel.app")
         );
     }
 
