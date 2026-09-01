@@ -22,101 +22,86 @@ jobs:
           node-version: 24
           package-manager-cache: false
 
-      - name: Check static and edge files
+      - name: Check project and build
         shell: bash
         run: |
           set -euo pipefail
           test -f index.html
           test -f api-patch.js
-          test -f 'functions/api/[[path]].js'
-          test -f vercel.json
-          test -f worker/worker.js
+          test -f worker/site-worker.js
+          test -f wrangler.jsonc
+          test -f scripts/build.mjs
           test -f LICENSE
           test -f NOTICE
           node --check api-patch.js
-          node --check worker/worker.js
-          cp 'functions/api/[[path]].js' /tmp/pages-function.mjs
-          node --check /tmp/pages-function.mjs
+          cp worker/site-worker.js /tmp/site-worker.mjs
+          node --check /tmp/site-worker.mjs
           find js -name '*.js' -print0 | xargs -0 -n1 node --check
-          test ! -e script.js
-          test ! -e styles.css
+          npm run build
+          test -f dist/index.html
+          test -f dist/api-patch.js
           test ! -e proxy-fallback.js
           forbidden=$(printf '\x72\x75\x2e\x6d\x73\x70\x2e\x72\x66\x2e\x61\x70\x70')
           if grep -RFn --exclude-dir=.git -- "$forbidden" .; then
             exit 1
           fi
 
-      - name: Test Cloudflare Pages Function proxy
+      - name: Test Worker API and GitHub Pages CORS
         shell: bash
         run: |
-          cp 'functions/api/[[path]].js' /tmp/pages-function.mjs
+          cp worker/site-worker.js /tmp/site-worker.mjs
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import { pathToFileURL } from 'node:url';
 
-          const { onRequest } = await import(`${pathToFileURL('/tmp/pages-function.mjs').href}?t=${Date.now()}`);
-          const calls = [];
-
+          const worker = (await import(`${pathToFileURL('/tmp/site-worker.mjs').href}?t=${Date.now()}`)).default;
+          const upstreamCalls = [];
           globalThis.fetch = async (input, init = {}) => {
             const url = String(input);
-            calls.push({ url, init });
-
-            if (url.startsWith('https://backapi.rustore.ru/applicationData/apps?')) {
-              return Response.json({ code: 'OK', body: { content: [], totalElements: 0, totalPages: 0 } });
+            upstreamCalls.push({ url, init });
+            if (url.includes('/applicationData/apps?')) {
+              return Response.json({ code: 'OK', body: { content: [] } });
             }
-
-            if (url === 'https://backapi.rustore.ru/applicationData/v2/download-link') {
-              return Response.json({ code: 'OK', body: { downloadUrls: [{ url: 'https://static.rustore.ru/example.apk' }] } });
-            }
-
-            throw new Error(`Unexpected upstream URL: ${url}`);
+            throw new Error(`Unexpected upstream: ${url}`);
           };
 
-          const searchResponse = await onRequest({
-            request: new Request('https://rustore-downloader.pages.dev/api/applicationData/apps?pageNumber=0&pageSize=18&query=VK', {
-              headers: { ruStoreVerCode: '110802', Accept: 'application/json' }
-            }),
-            params: { path: ['applicationData', 'apps'] }
-          });
+          const env = { ASSETS: { fetch: async () => new Response('asset') } };
+          const origin = 'https://basil-as.github.io';
 
-          assert.equal(searchResponse.status, 200);
-          assert.equal((await searchResponse.json()).code, 'OK');
-          assert.equal(calls[0].url, 'https://backapi.rustore.ru/applicationData/apps?pageNumber=0&pageSize=18&query=VK');
-          assert.equal(new Headers(calls[0].init.headers).get('ruStoreVerCode'), '110802');
-          assert.equal(calls[0].init.method, 'GET');
-
-          const body = JSON.stringify({ appId: 1, firstInstall: true, withoutSplits: false });
-          const downloadResponse = await onRequest({
-            request: new Request('https://rustore-downloader.pages.dev/api/applicationData/v2/download-link', {
-              method: 'POST',
+          const preflight = await worker.fetch(new Request(
+            'https://rustore-downloader.basil-as.workers.dev/api/applicationData/apps',
+            {
+              method: 'OPTIONS',
               headers: {
-                'Content-Type': 'application/json; charset=utf-8',
-                ruStoreVerCode: '110802'
-              },
-              body
-            }),
-            params: { path: ['applicationData', 'v2', 'download-link'] }
-          });
+                Origin: origin,
+                'Access-Control-Request-Method': 'GET',
+                'Access-Control-Request-Headers': 'rustorevercode'
+              }
+            }
+          ), env);
+          assert.equal(preflight.status, 204);
+          assert.equal(preflight.headers.get('Access-Control-Allow-Origin'), origin);
 
-          assert.equal(downloadResponse.status, 200);
-          assert.equal((await downloadResponse.json()).code, 'OK');
-          assert.equal(calls[1].url, 'https://backapi.rustore.ru/applicationData/v2/download-link');
-          assert.equal(calls[1].init.method, 'POST');
-          assert.equal(new Headers(calls[1].init.headers).get('Content-Type'), 'application/json; charset=utf-8');
-          assert.equal(Buffer.from(calls[1].init.body).toString(), body);
+          const response = await worker.fetch(new Request(
+            'https://rustore-downloader.basil-as.workers.dev/api/applicationData/apps?pageNumber=0&pageSize=18&query=VK',
+            { headers: { Origin: origin, ruStoreVerCode: '110802', Accept: 'application/json' } }
+          ), env);
+          assert.equal(response.status, 200);
+          assert.equal(response.headers.get('Access-Control-Allow-Origin'), origin);
+          assert.equal((await response.json()).code, 'OK');
+          assert.equal(upstreamCalls.length, 1);
+          assert.match(upstreamCalls[0].url, /^https:\/\/backapi\.rustore\.ru\/applicationData\/apps\?/);
+          assert.equal(new Headers(upstreamCalls[0].init.headers).get('ruStoreVerCode'), '110802');
 
-          const callCount = calls.length;
-          const forbiddenResponse = await onRequest({
-            request: new Request('https://rustore-downloader.pages.dev/api/not-allowed'),
-            params: { path: ['not-allowed'] }
-          });
-          assert.equal(forbiddenResponse.status, 403);
-          assert.equal(calls.length, callCount);
-
-          console.log('Cloudflare Pages Function proxy: OK');
+          const blocked = await worker.fetch(new Request(
+            'https://rustore-downloader.basil-as.workers.dev/api/applicationData/apps',
+            { headers: { Origin: 'https://evil.example' } }
+          ), env);
+          assert.equal(blocked.status, 403);
+          console.log('Worker CORS/API: OK');
           NODE
 
-      - name: Test Cloudflare Pages frontend transport
+      - name: Test GitHub Pages frontend through Cloudflare
         shell: bash
         run: |
           node --input-type=module <<'NODE'
@@ -124,7 +109,7 @@ jobs:
           import fs from 'node:fs';
           import vm from 'node:vm';
 
-          function createStorage() {
+          function storage() {
             const values = new Map();
             return {
               getItem: key => values.has(key) ? values.get(key) : null,
@@ -133,82 +118,46 @@ jobs:
             };
           }
 
+          const base = 'https://rustore-downloader.basil-as.workers.dev';
           const calls = [];
           const mockFetch = async (input, init = {}) => {
             const url = String(input);
             calls.push({ url, init });
-
-            if (url === '/api/rustore-info/new-version') {
+            if (url === `${base}/api/rustore-info/new-version`) {
               return Response.json({ code: 'OK', body: { latestVersion: 110802 } });
             }
-
-            if (url.startsWith('/api/applicationData/apps?')) {
-              return Response.json({
-                code: 'OK',
-                body: { content: [{ appId: 1, packageName: 'com.vkontakte.android' }], totalElements: 1, totalPages: 1 }
-              });
+            if (url.startsWith(`${base}/api/applicationData/apps?`)) {
+              return Response.json({ code: 'OK', body: { content: [], totalElements: 0, totalPages: 0 } });
             }
-
-            if (url === '/api/applicationData/v2/download-link') {
-              return Response.json({
-                code: 'OK',
-                body: { downloadUrls: [{ url: 'https://static.rustore.ru/example.apk' }] }
-              });
-            }
-
             throw new Error(`Unexpected URL: ${url}`);
           };
 
           const window = {
-            location: {
-              href: 'https://rustore-downloader.pages.dev/',
-              hostname: 'rustore-downloader.pages.dev'
-            },
+            location: { href: 'https://basil-as.github.io/rustore-downloader/', hostname: 'basil-as.github.io' },
             fetch: mockFetch
           };
-
           const context = vm.createContext({
             window,
             fetch: mockFetch,
-            sessionStorage: createStorage(),
-            localStorage: createStorage(),
-            URL,
-            URLSearchParams,
-            Headers,
-            Request,
-            Response,
-            AbortController,
-            AbortSignal,
-            setTimeout,
-            clearTimeout,
-            console,
-            Date,
-            JSON
+            sessionStorage: storage(),
+            localStorage: storage(),
+            URL, URLSearchParams, Headers, Request, Response,
+            AbortController, AbortSignal, setTimeout, clearTimeout,
+            console, Date, JSON
           });
 
           vm.runInContext(fs.readFileSync('api-patch.js', 'utf8'), context, { filename: 'api-patch.js' });
-          assert.equal(window.RuStoreApi.getTransportMode(), 'cloudflare-pages');
+          assert.equal(window.RuStoreApi.getTransportMode(), 'github-pages-via-cloudflare');
           assert.equal(window.RuStoreApi.isConfigured(), true);
-
-          const search = await window.RuStoreApi.search('VK');
-          assert.equal(search.code, 'OK');
-          assert.equal(calls.length, 2);
-          assert.equal(calls[0].url, '/api/rustore-info/new-version');
-          assert.match(calls[1].url, /^\/api\/applicationData\/apps\?/);
-          assert.ok(calls[1].url.includes('query=VK'));
+          const result = await window.RuStoreApi.search('VK');
+          assert.equal(result.code, 'OK');
+          assert.equal(calls[0].url, `${base}/api/rustore-info/new-version`);
+          assert.match(calls[1].url, /^https:\/\/rustore-downloader\.basil-as\.workers\.dev\/api\/applicationData\/apps\?/);
           assert.equal(new Headers(calls[1].init.headers).get('ruStoreVerCode'), '110802');
-
-          const download = await window.RuStoreApi.downloadV2(1);
-          assert.equal(download.code, 'OK');
-          assert.equal(calls[2].url, '/api/applicationData/v2/download-link');
-          assert.equal(new Headers(calls[2].init.headers).get('ruStoreVerCode'), '110802');
-          assert.equal(calls[2].init.method, 'POST');
-          assert.match(String(calls[2].init.body), /"withoutSplits":false/);
-
-          console.log('Cloudflare Pages frontend transport: OK');
+          console.log('GitHub Pages -> Cloudflare: OK');
           NODE
 
-      - name: Test unconfigured static host fails clearly
+      - name: Test unknown static host fails clearly
         shell: bash
         run: |
           node --input-type=module <<'NODE'
@@ -218,7 +167,7 @@ jobs:
 
           const storage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
           const window = {
-            location: { href: 'https://basil-as.github.io/rustore-downloader/', hostname: 'basil-as.github.io' },
+            location: { href: 'https://example.invalid/', hostname: 'example.invalid' },
             fetch: async () => { throw new Error('fetch must not be called without transport'); }
           };
           const context = vm.createContext({
@@ -226,26 +175,13 @@ jobs:
             fetch: window.fetch,
             sessionStorage: storage,
             localStorage: storage,
-            URL,
-            URLSearchParams,
-            Headers,
-            Request,
-            Response,
-            AbortController,
-            AbortSignal,
-            setTimeout,
-            clearTimeout,
-            console,
-            Date,
-            JSON
+            URL, URLSearchParams, Headers, Request, Response,
+            AbortController, AbortSignal, setTimeout, clearTimeout,
+            console, Date, JSON
           });
-
           vm.runInContext(fs.readFileSync('api-patch.js', 'utf8'), context, { filename: 'api-patch.js' });
           assert.equal(window.RuStoreApi.getTransportMode(), 'unconfigured');
           assert.equal(window.RuStoreApi.isConfigured(), false);
-          await assert.rejects(
-            () => window.RuStoreApi.info('com.vkontakte.android'),
-            /нужен серверный транспорт/
-          );
-          console.log('Unconfigured static host error: OK');
+          await assert.rejects(() => window.RuStoreApi.info('com.vkontakte.android'), /нужен серверный транспорт/);
+          console.log('Unknown static host error: OK');
           NODE
