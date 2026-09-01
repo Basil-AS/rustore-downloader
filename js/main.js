@@ -1,6 +1,6 @@
-import { $, dom, state, PACKAGE_RE } from "./common.js";
-import { setStatus, emptyState, hideModal, openPreview, updatePreview } from "./render.js";
-import { searchApps, getDetails, showDetails, showVersions, showComments, downloadApp, updateSuggestions, screenshots } from "./actions.js";
+import { $, dom, state, PACKAGE_RE } from "./common.js?v=20260901-10";
+import { setStatus, emptyState, hideModal, openPreview, updatePreview } from "./render.js?v=20260901-10";
+import { searchApps, getDetails, showDetails, showVersions, showComments, downloadApp, updateSuggestions, screenshots } from "./actions.js?v=20260901-10";
 
 let searchTimer;
 let suggestionTimer;
