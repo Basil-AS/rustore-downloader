@@ -58,7 +58,8 @@ a, button { -webkit-tap-highlight-color: transparent; }
 .suggestions button { display: block; width: 100%; padding: 11px 13px; color: var(--text); border: 0; border-radius: 10px; background: transparent; text-align: left; cursor: pointer; }
 .suggestions button:hover { background: #f1efff; }
 .search-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 11px; color: var(--muted); font-size: .84rem; }
-.search-footer p { margin: 0; }
+.search-footer p { flex: 1 1 auto; margin: 0; }
+.search-examples { display: flex; flex: 0 0 auto; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .example-chip { padding: 6px 10px; color: var(--primary); border: 1px solid #dcd8ff; border-radius: 999px; background: #f3f1ff; white-space: nowrap; cursor: pointer; }
 
 .results-section { min-height: 290px; padding: 34px 0 70px; }
