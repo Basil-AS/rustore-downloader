@@ -1,5 +1,5 @@
 const RUSTORE_ORIGIN = "https://backapi.rustore.ru";
-const FALLBACK_VERSION_CODE = "12000";
+const FALLBACK_VERSION_CODE = "110802";
 const ALLOWED_PATHS = [
     /^\/rustore-info\/new-version$/,
     /^\/applicationData\/apps$/,
@@ -37,8 +37,12 @@ async function getVersionCode() {
     if (cachedVersion && Date.now() < cachedVersionUntil) return cachedVersion;
     try {
         const response = await fetch(`${RUSTORE_ORIGIN}/rustore-info/new-version`, {
-            headers: { Accept: "application/json" }
+            headers: {
+                Accept: "application/json",
+                ruStoreVerCode: FALLBACK_VERSION_CODE
+            }
         });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         cachedVersion = String(data?.body?.latestVersion || FALLBACK_VERSION_CODE);
     } catch {
